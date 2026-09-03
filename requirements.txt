@@ -1,0 +1,9 @@
+streamlit>=1.38
+yfinance>=0.2.43
+pandas>=2.2
+numpy>=1.26
+plotly>=5.24
+pyyaml>=6.0
+requests>=2.31   # direct dependency for market_index.py's S&P 500 / NASDAQ-100 constituent fetch (with a User-Agent header, which yfinance's bundled requests use doesn't expose)
+lxml>=5.0        # HTML table parser backing pandas.read_html in market_index.py
+pytest>=8.0

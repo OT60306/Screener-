@@ -1,0 +1,103 @@
+# Stock Intel & Health Scorecard — configuration
+# Keep tunable numbers here, not hardcoded in src/.
+
+universe_file: "data/universe.csv"                          # Page 2's scan candidate pool
+rs_benchmark_universe_file: "data/rs_benchmark_universe.csv" # broad, diversified peer set RS Rating percentiles are ranked against — separate from universe_file so RS isn't just ranked within a small, often already-strong watchlist
+benchmark_ticker: "SPY"          # index used for market health (Trend Template applied to the index itself)
+
+cache:
+  market_ttl_hours: 24           # fear & greed
+  macro_calendar_ttl_hours: 168  # 1 week — scheduled events barely move
+  trading_ttl_hours: 6           # price/volume
+  fundamentals_ttl_hours: 168    # 1 week
+  governance_ttl_hours: 168
+  catalysts_ttl_hours: 12        # news — refresh often
+
+trading:
+  rs_rating_min: 70
+  match_score_display_min: 80    # kept as a reference threshold; Page 2 displays a ranked Top-N instead
+  top_n_display: 15              # Page 2 shows the top N by Trend Template match % (RS Rating as tiebreaker)
+  trend_template:
+    pct_above_52wk_low_min: 30
+    pct_below_52wk_high_max: 25
+    sma_trend_lookback_days: 21
+  # Stage 1 — Liquidity Filter: minimum tradability gate, checked before the
+  # trend template even runs. Screens out illiquid names prone to wide
+  # spreads / slippage on entry-exit.
+  liquidity:
+    min_avg_volume_10d: 350000
+    window_days: 10
+  # Stage 4 — Entry Trigger & VCP Quality: Volume Dry-Up (VDU) confirms supply
+  # has dried up going into a base/handle before a breakout or pocket pivot.
+  # "recent_window" is the tail-end VDU read window; "ma_window" is its
+  # baseline; "max_ratio_pct" is the pass threshold (recent/MA50, at or below
+  # this %).
+  entry_trigger:
+    vdu_recent_window_days: 5
+    vdu_ma_window_days: 50
+    vdu_max_ratio_pct: 70.0
+
+value:
+  reverse_dcf:
+    discount_rate: 0.10
+    terminal_growth: 0.025
+    projection_years: 10
+  health_score_weights:          # must sum to 1.0; circle-of-competence & governance excluded by design
+    historical_health: 0.41
+    moat_quality: 0.35
+    reverse_dcf_margin_of_safety: 0.24
+  top_leaderboard_size: 15
+
+  # Circle of competence — deliberately NOT inferred from business-summary
+  # text (too unreliable to fabricate flagship-product claims). Manually
+  # maintained per ticker — add tickers as you research them. Not scored —
+  # see CLAUDE.md flag #2.
+  circle_of_competence_products:
+    GOOGL:
+      - "Search (Google Search)"
+      - "YouTube"
+      - "Google Cloud"
+      - "Android OS"
+      - "Gemini AI models"
+    AAPL:
+      - "iPhone"
+      - "Mac"
+      - "App Store / Services"
+      - "AirPods / Wearables"
+    MSFT:
+      - "Windows"
+      - "Microsoft 365 / Office"
+      - "Azure Cloud"
+      - "Xbox / Gaming"
+      - "LinkedIn"
+    AMZN:
+      - "Amazon.com Marketplace"
+      - "AWS (Amazon Web Services)"
+      - "Prime"
+      - "Advertising"
+    META:
+      - "Facebook"
+      - "Instagram"
+      - "WhatsApp"
+      - "Reality Labs (VR/AR)"
+    NVDA:
+      - "Data Center GPUs (AI training/inference)"
+      - "Gaming GPUs (GeForce)"
+      - "CUDA software platform"
+
+macro_events:
+  # Static/manually-maintained until a live economic calendar source is wired in.
+  # "date" = next/most recent occurrence (YYYY-MM-DD) — update as it rolls.
+  # "consensus" = one-line expectation summary, shown when today is on/near "date".
+  - name: "Nonfarm Payrolls (NFP)"
+    frequency: "monthly, 1st Friday"
+    date: "2026-09-04"
+    consensus: "Consensus: +150K jobs added, unemployment rate holding at 4.3%"
+  - name: "FOMC Meeting"
+    frequency: "8x per year, see federalreserve.gov calendar"
+    date: "2026-09-16"
+    consensus: "Consensus: Fed cuts rates 0.25%, with a 0.50% cut seen as a lower-probability dovish scenario"
+  - name: "CPI Release"
+    frequency: "monthly, ~mid-month"
+    date: "2026-09-11"
+    consensus: "Consensus: headline CPI +0.2% m/m, core CPI +0.3% m/m"
