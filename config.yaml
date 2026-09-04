@@ -14,7 +14,7 @@ cache:
   catalysts_ttl_hours: 12        # news — refresh often
 
 trading:
-  rs_rating_min: 70
+  rs_rating_min: 89   # Stage 2 Trend Template's RS criterion — matches Page 2's RS Rating > 89 display filter
   match_score_display_min: 80    # kept as a reference threshold; Page 2 displays a ranked Top-N instead
   top_n_display: 15              # Page 2 shows the top N by Trend Template match % (RS Rating as tiebreaker)
   trend_template:
@@ -36,6 +36,23 @@ trading:
     vdu_recent_window_days: 5
     vdu_ma_window_days: 50
     vdu_max_ratio_pct: 70.0
+  # Stage 4 (cont'd) — VCP (Volatility Contraction Pattern) quality grading.
+  # zigzag_pct_threshold = min % price reversal to confirm a swing point (a
+  # ZigZag detector, not a fixed day-count window — needed because later VCP
+  # waves get shorter/tighter, which a fixed window misses); lookback_days is
+  # the base formation window; tightening_tolerance_pct allows near-ties when
+  # checking each wave is shallower than the last; the final-contraction VDU
+  # threshold is stricter than the general Stage 4 VDU above (dry-up must be
+  # deeper in the last, tightest wave); breakout_volume_multiple is the pivot
+  # breakout day's required volume vs. its 50-day average.
+  vcp:
+    lookback_days: 130
+    zigzag_pct_threshold: 8.0
+    tightening_tolerance_pct: 3.0
+    final_contraction_vdu_max_ratio_pct: 50.0
+    breakout_volume_multiple: 1.5
+    rs_line_lookback_days: 252
+    market_leader_rs_min: 90
 
 value:
   reverse_dcf:

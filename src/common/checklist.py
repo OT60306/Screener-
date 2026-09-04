@@ -1,6 +1,6 @@
 """
 Renders a {key: True|False|None} results dict (Trend Template, CANSLIM, ...)
-as a readable list instead of raw st.json — colored status dot + label, no
+as a readable list instead of raw st.json — colored status marker + label, no
 emoji. One component so every page that shows this shape of data looks the
 same.
 """
@@ -18,8 +18,14 @@ TREND_TEMPLATE_LABELS: dict[str, str] = {
     "price_above_50": "Price above SMA 50",
     "above_52wk_low_min_pct": "≥30% above 52-week low",
     "within_52wk_high_max_pct": "Within 25% of 52-week high",
-    "rs_rating_min": "RS Rating ≥ 70",
+    "rs_rating_min": "RS Rating > 89",
 }
+
+# CSS classes defined in theme.py (span.status-good/bad/neutral/na) — a
+# class selector beats the app-wide "span { color: ... !important }" rule on
+# specificity, which a plain inline color style (even with !important) is
+# not reliably guaranteed to do. Don't switch this back to inline styles.
+_STATUS_CLASS = {"pass": "status-good", "fail": "status-bad", "pending": "status-neutral", "na": "status-na"}
 
 
 def _status_class(value) -> str:
@@ -40,8 +46,10 @@ def render_checklist(results: dict, labels: dict | None = None, pending_keys: se
     for key, value in results.items():
         label = labels.get(key, key.replace("_", " ").title())
         status = "pending" if value is None and key in pending_keys else _status_class(value)
+        css_class = _STATUS_CLASS[status]
         lines.append(
-            f"<div class='status-line'><span class='status-dot {status}'></span>"
+            f"<div style='display:flex;align-items:center;gap:0.6rem;font-size:0.95rem;padding:0.15rem 0;'>"
+            f"<span class='{css_class}' style='font-size:1.05rem;line-height:1;'>&#9679;</span>"
             f"<span>{label}</span></div>"
         )
     st.markdown(

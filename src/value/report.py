@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 import pandas as pd
@@ -71,27 +72,32 @@ def build_stock_health_report(ticker: str, cfg: dict, news_fn=None) -> dict:
     }
 
 
-def scan_leaderboard(tickers: list[str], cfg: dict) -> pd.DataFrame:
+def _leaderboard_row(t: str, cfg: dict) -> dict:
+    try:
+        report = build_stock_health_report(t, cfg)
+        return {
+            "ticker": t,
+            "company_name": report["company_name"],
+            "health_score": report["health_score"]["health_score"],
+            "coverage_pct": report["health_score"]["coverage_pct"],
+            "moat_verdict": report["3.1_fundamental"]["moat_verification"]["verdict"],
+            "piotroski_f_score": report["3.2_historical_health"]["piotroski_f_score"],
+            "jitta_score_proxy": report["3.2_historical_health"]["jitta_score_proxy"]["jitta_score_proxy"],
+        }
+    except Exception as exc:
+        return {"ticker": t, "company_name": None, "health_score": None, "error": str(exc)}
+
+
+def scan_leaderboard(tickers: list[str], cfg: dict, max_workers: int = 12) -> pd.DataFrame:
     """Runs the numeric parts of the Page 3 report across a watchlist/universe
-    and returns the Top-N Health Score leaderboard (size from config)."""
+    and returns the Top-N Health Score leaderboard (size from config). Each
+    ticker's report (price history + full financial statements) is fetched
+    independently, so tickers are scored concurrently — this is by far the
+    most network-heavy scan in the app (3+ fetches per ticker vs. 1 for the
+    Trading Scanner), so parallelizing it matters the most here."""
     top_n = cfg.get("value", {}).get("top_leaderboard_size", 15)
-    rows = []
-    for t in tickers:
-        try:
-            report = build_stock_health_report(t, cfg)
-            rows.append(
-                {
-                    "ticker": t,
-                    "company_name": report["company_name"],
-                    "health_score": report["health_score"]["health_score"],
-                    "coverage_pct": report["health_score"]["coverage_pct"],
-                    "moat_verdict": report["3.1_fundamental"]["moat_verification"]["verdict"],
-                    "piotroski_f_score": report["3.2_historical_health"]["piotroski_f_score"],
-                    "jitta_score_proxy": report["3.2_historical_health"]["jitta_score_proxy"]["jitta_score_proxy"],
-                }
-            )
-        except Exception as exc:
-            rows.append({"ticker": t, "company_name": None, "health_score": None, "error": str(exc)})
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        rows = list(executor.map(lambda t: _leaderboard_row(t, cfg), tickers))
 
     out = pd.DataFrame(rows)
     if "health_score" in out.columns:

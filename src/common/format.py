@@ -98,9 +98,36 @@ def render_series_table(
     st.dataframe(df, width="stretch")
 
 
+def status_badge_html(status: Optional[bool], pass_text: str = "PASS", fail_text: str = "FAIL", na_text: str = "N/A") -> str:
+    """Returns a colored <span> (not rendered itself) — for embedding a
+    Pass/Fail badge inline with other text in a single st.markdown call,
+    e.g. right in front of a section heading. Note: st.metric's `delta`
+    param does NOT reliably color "Pass"/"Fail" text — Streamlit's automatic
+    delta coloring only recognizes a leading "-" as negative, so arbitrary
+    text like "Fail" renders with the same color as "Pass". Use this instead
+    of delta text whenever the value is a status word, not a real delta.
+
+    Uses the status-good/status-bad/status-na classes from theme.py rather
+    than an inline color style: a class selector reliably beats the app-wide
+    `span { color: ... !important }` rule on specificity, which a plain
+    inline color is not guaranteed to do."""
+    if status is True:
+        return f"<span class='status-good' style='font-weight:800;'>{pass_text}</span>"
+    if status is False:
+        return f"<span class='status-bad' style='font-weight:800;'>{fail_text}</span>"
+    return f"<span class='status-na' style='font-weight:800;'>{na_text}</span>"
+
+
+def stage_header(text: str, status: Optional[bool]) -> None:
+    """Renders a section heading with a Pass/Fail/N-A badge directly in
+    front of it, on the same line."""
+    st.markdown(f"{status_badge_html(status)} &nbsp; **{text}**", unsafe_allow_html=True)
+
+
 def verdict_badge(text: str, kind: str = "neutral") -> None:
-    """kind: 'good' | 'bad' | 'neutral' — colored text badge, no emoji."""
-    color = {"good": "#8FD19E", "bad": "#E38B8B", "neutral": "#F2A36B"}.get(kind, "#F2A36B")
+    """kind: 'good' (green) | 'bad' (red) | 'neutral' (yellow) — colored text
+    badge, no emoji."""
+    color = {"good": "#8FD19E", "bad": "#E38B8B", "neutral": "#E9C46A"}.get(kind, "#E9C46A")
     st.markdown(
         f"<div class='verdict-badge' style='border-color:{color};color:{color};'>{text}</div>",
         unsafe_allow_html=True,

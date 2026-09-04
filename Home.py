@@ -5,22 +5,12 @@ from src.common.theme import apply_theme
 st.set_page_config(page_title="Stock Intel & Health Scorecard", layout="wide")
 apply_theme()
 
-st.title("Stock Intel & Health Scorecard")
-st.markdown(
-    """
-Use the sidebar to navigate:
-
-- **Market Pulse** — Fear & Greed, index charts, macro calendar, market-wide trend health
-- **Trading Scanner** — Minervini Trend Template + O'Neil CANSLIM scan, ranked, >80% matches
-- **Health Scorecard** — deep fundamental read on one stock + Top 15 healthiest-stocks leaderboard
-
-All data is cached locally (`data/cache/`) with graceful fallback if a source
-is unavailable — see `CLAUDE.md` for the full design notes.
-"""
-)
-
-st.info(
-    "First run will populate the cache from yfinance and can take a moment. "
-    "If you're offline or yfinance is rate-limited, pages will show cached/'unavailable' "
-    "states instead of crashing."
-)
+# st.navigation controls the sidebar explicitly — only the pages listed below
+# appear (no separate "Home" entry auto-generated from this entry script).
+# The app opens directly on Market Pulse.
+pages = [
+    st.Page("pages/1_Market_Pulse.py", title="Market Pulse", default=True),
+    st.Page("pages/2_Trading_Scanner.py", title="Trading Scanner"),
+    st.Page("pages/3_Health_Scorecard.py", title="Health Scorecard"),
+]
+st.navigation(pages).run()

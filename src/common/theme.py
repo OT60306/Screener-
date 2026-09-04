@@ -35,14 +35,7 @@ html, body, [class*="css"] {{
 }}
 
 .stApp {{
-  background: linear-gradient(165deg,
-    {PEACH} 0%,
-    {ROSE} 22%,
-    {BURGUNDY} 48%,
-    {PLUM} 68%,
-    {DEEP_PLUM} 85%,
-    {INK} 100%);
-  background-attachment: fixed;
+  background: {INK};
   color: {OFF_WHITE};
 }}
 
@@ -221,6 +214,16 @@ ul[data-baseweb="menu"], div[data-baseweb="popover"] {{
 .status-dot.fail {{ background: #E38B8B; }}
 .status-dot.pending {{ background: #E9C46A; }}
 .status-dot.na {{ background: rgba(247, 241, 236, 0.35); }}
+
+/* Pass/Fail text markers (checklist bullets, stage-header badges). Class
+   selector on top of the element type ("span.status-good") is more specific
+   than the blanket "span {{ color: ... !important }}" rule above, so this
+   reliably wins regardless of inline-style/!important cascade edge cases —
+   don't revert to inline color styles for these, they get silently stomped. */
+span.status-good {{ color: #8FD19E !important; }}
+span.status-bad {{ color: #E38B8B !important; }}
+span.status-neutral {{ color: #E9C46A !important; }}
+span.status-na {{ color: #000000 !important; }}
 
 .verdict-badge {{
   display: inline-block;

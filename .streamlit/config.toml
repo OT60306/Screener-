@@ -5,3 +5,6 @@ backgroundColor = "#1B1931"
 secondaryBackgroundColor = "#2E2A4D"
 textColor = "#F7F1EC"
 font = "sans serif"
+
+[client]
+toolbarMode = "minimal"  # hides the Deploy button and dev-tools menu in the top-right toolbar

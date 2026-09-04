@@ -4,17 +4,20 @@ import streamlit as st
 
 from src.common.config import load_config
 from src.common.universe import load_universe
-from src.common.charts import price_chart
-from src.common.theme import apply_theme
+from src.common.market_index import get_broad_market_universe
+from src.common.charts import render_price_chart
 from src.common.format import fmt, fmt_pct, fmt_money, render_kv_rows, render_series_table, verdict_badge
 from src.value.report import build_stock_health_report, scan_leaderboard
 
-st.set_page_config(page_title="Health Scorecard", layout="wide")
-apply_theme()
 st.title("Stock Health Scorecard")
 
 cfg = load_config()
 universe = load_universe(cfg.get("universe_file", "data/universe.csv"))
+# Same broad-market pool as the Trading Scanner (Page 2) — a leaderboard
+# scoped to only the small hand-picked watchlist isn't really "healthiest in
+# the market."
+broad_market = get_broad_market_universe()
+leaderboard_pool = sorted(set(universe) | set(broad_market))
 
 default_ticker = st.query_params.get("ticker", universe[0] if universe else "AAPL")
 ticker = st.text_input("Ticker", value=default_ticker).strip().upper()
@@ -33,7 +36,7 @@ if ticker:
         st.warning("Not enough data to compute a Health Score for this ticker.")
 
     if report.get("price_history") is not None and not report["price_history"].empty:
-        st.plotly_chart(price_chart(report["price_history"], ticker, report.get("entry_timing")), width='stretch')
+        render_price_chart(report["price_history"], ticker, report.get("entry_timing"))
 
     st.divider()
     st.subheader("3.1 — Fundamental")
@@ -135,7 +138,16 @@ if ticker:
                 ("Terminal growth", fmt_pct(a["terminal_growth_pct"], 2)),
                 ("Projection years", fmt(a["years"], 0)),
             ])
-        verdict_badge(rd["assessment"]["verdict"], "neutral")
+        gap_pct = rd["assessment"].get("gap_pct")
+        if gap_pct is None:
+            badge_kind = "neutral"
+        elif gap_pct > 5:
+            badge_kind = "good"   # market pricing LESS than historical growth — potentially undervalued
+        elif gap_pct < -5:
+            badge_kind = "bad"    # market pricing MORE than historical growth — priced for acceleration, higher risk
+        else:
+            badge_kind = "neutral"  # roughly matches
+        verdict_badge(rd["assessment"]["verdict"], badge_kind)
     with c2:
         st.markdown("**Catalysts** — recent news (product launches, litigation, regulatory, macro)")
         cat = rd["catalysts"]
@@ -168,16 +180,26 @@ if ticker:
 
 st.divider()
 st.subheader(f"Top {cfg.get('value', {}).get('top_leaderboard_size', 15)} Healthiest Stocks")
-if st.button("Run leaderboard scan (can take a while for large universes)"):
-    with st.spinner("Scoring universe..."):
-        board = scan_leaderboard(universe, cfg)
+st.caption(
+    f"Scores the {len(leaderboard_pool)}-ticker pool ({len(universe)}-ticker watchlist + full S&P 500 + "
+    f"NASDAQ-100). This fetches full financial statements per ticker (heavier than the Trading Scanner's "
+    f"price-only scan) — a cold run across the full pool can take a long while; each ticker is cached "
+    f"afterward."
+)
+if st.button(f"Run leaderboard scan across {len(leaderboard_pool)} tickers (can take a while)"):
+    with st.spinner(f"Scoring {len(leaderboard_pool)} tickers..."):
+        board = scan_leaderboard(leaderboard_pool, cfg)
     board_display = board.copy()
+    board_display = board_display.drop(columns=["coverage_pct", "moat_verdict"], errors="ignore")
     if "health_score" in board_display.columns:
         board_display["health_score"] = board_display["health_score"].map(lambda v: fmt(v, 2))
-    if "coverage_pct" in board_display.columns:
-        board_display["coverage_pct"] = board_display["coverage_pct"].map(lambda v: fmt_pct(v, 2))
     if "jitta_score_proxy" in board_display.columns:
         board_display["jitta_score_proxy"] = board_display["jitta_score_proxy"].map(lambda v: fmt(v, 2))
+    board_display = board_display.rename(columns={
+        "ticker": "Ticker", "company_name": "Company", "health_score": "Health Score",
+        "piotroski_f_score": "Piotroski F-Score", "jitta_score_proxy": "Jitta Score Proxy",
+        "error": "Error",
+    })
     st.dataframe(board_display, width='stretch', hide_index=True)
 else:
     st.caption("Click to score the full universe — not run automatically, since it fetches full "

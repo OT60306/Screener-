@@ -7,6 +7,7 @@ in one place.
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 import pandas as pd
@@ -36,6 +37,13 @@ def get_price_history(ticker: str, ttl_hours: float = 6) -> Optional[pd.DataFram
         df = _retry(lambda: yf.Ticker(ticker).history(period=PRICE_HISTORY_PERIOD))
         if df is None or df.empty:
             raise ValueError(f"empty price history for {ticker}")
+        # yfinance can return a partial row for the still-open current session
+        # (real Volume, but NaN OHLC) — drop it so no consumer's .iloc[-1]
+        # silently poisons into NaN. Dropped before caching so a later refetch
+        # after the session closes picks up the completed bar.
+        df = df.dropna(subset=["Close"])
+        if df.empty:
+            raise ValueError(f"empty price history for {ticker} after dropping incomplete rows")
         return df.reset_index().to_dict(orient="list")
 
     try:
@@ -47,6 +55,21 @@ def get_price_history(ticker: str, ttl_hours: float = 6) -> Optional[pd.DataFram
         return df
     except Exception:
         return None
+
+
+def get_price_histories(tickers: list[str], ttl_hours: float = 6, max_workers: int = 16) -> dict[str, Optional[pd.DataFrame]]:
+    """Batch version of get_price_history — fetches many tickers concurrently
+    (I/O-bound: network + per-ticker cache file, threads release the GIL
+    while waiting on either) instead of one at a time. A full ~500-ticker
+    scan is network-latency-bound, so this is the single biggest lever on
+    cold-cache scan time; each ticker still goes through the same cache/
+    retry/degrade path as get_price_history, so results are identical —
+    just fetched in parallel."""
+    if not tickers:
+        return {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(executor.map(lambda t: get_price_history(t, ttl_hours), tickers))
+    return dict(zip(tickers, results))
 
 
 def get_info(ticker: str, ttl_hours: float = 168) -> Optional[dict]:
