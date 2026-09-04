@@ -9,11 +9,20 @@ a crash, and a clear "fetch failed, using cache from <time>" signal.
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-CACHE_ROOT = Path(__file__).resolve().parents[2] / "data" / "cache"
+if getattr(sys, "frozen", False):
+    # Packaged .exe (PyInstaller onefile): the app runs out of a temp dir
+    # (sys._MEIPASS) that's deleted when the process exits, so a cache
+    # written there would never survive between launches — every run would
+    # have to refetch everything from scratch, defeating the point of
+    # caching. Persist next to the .exe itself instead.
+    CACHE_ROOT = Path(sys.executable).resolve().parent / "data" / "cache"
+else:
+    CACHE_ROOT = Path(__file__).resolve().parents[2] / "data" / "cache"
 
 
 def _path_for(namespace: str, key: str) -> Path:
