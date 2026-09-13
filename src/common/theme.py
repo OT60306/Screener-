@@ -208,7 +208,7 @@ ul[data-baseweb="menu"], div[data-baseweb="popover"] {{
   padding: 0.15rem 0;
 }}
 .status-dot {{
-  width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
 }}
 .status-dot.pass {{ background: #8FD19E; }}
 .status-dot.fail {{ background: #E38B8B; }}
@@ -223,7 +223,7 @@ ul[data-baseweb="menu"], div[data-baseweb="popover"] {{
 span.status-good {{ color: #8FD19E !important; }}
 span.status-bad {{ color: #E38B8B !important; }}
 span.status-neutral {{ color: #E9C46A !important; }}
-span.status-na {{ color: #000000 !important; }}
+span.status-na {{ color: rgba(247, 241, 236, 0.5) !important; }}
 
 .verdict-badge {{
   display: inline-block;

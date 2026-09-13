@@ -18,6 +18,61 @@ def _has_enough_history(df: pd.DataFrame, min_days: int) -> bool:
     return df is not None and not df.empty and len(df) >= min_days
 
 
+def find_swings(df: pd.DataFrame, pct_threshold: float = 5.0) -> list[dict]:
+    """ZigZag swing detection: tracks a running extreme (starting by looking
+    for a high), and confirms it as a swing point only once price reverses by
+    at least `pct_threshold`% from that extreme — then flips to tracking the
+    opposite extreme. Standard technique; adapts to shrinking/growing wave
+    sizes naturally since the threshold is relative, not a fixed bar count.
+    Shared by vcp.py's contraction detection and the pattern detectors in
+    src/trading/patterns/."""
+    n = len(df)
+    if n == 0:
+        return []
+    highs, lows = df["High"], df["Low"]
+
+    swings: list[dict] = []
+    looking_for_high = True
+    ext_idx, ext_price = 0, float(highs.iloc[0])
+
+    for i in range(1, n):
+        hi, lo = float(highs.iloc[i]), float(lows.iloc[i])
+        if looking_for_high:
+            if hi > ext_price:
+                ext_idx, ext_price = i, hi
+            elif ext_price > 0 and (ext_price - lo) / ext_price * 100 >= pct_threshold:
+                swings.append({"idx": ext_idx, "date": df.index[ext_idx], "price": ext_price, "type": "high"})
+                looking_for_high = False
+                ext_idx, ext_price = i, lo
+        else:
+            if lo < ext_price:
+                ext_idx, ext_price = i, lo
+            elif ext_price > 0 and (hi - ext_price) / ext_price * 100 >= pct_threshold:
+                swings.append({"idx": ext_idx, "date": df.index[ext_idx], "price": ext_price, "type": "low"})
+                looking_for_high = True
+                ext_idx, ext_price = i, hi
+
+    return swings
+
+
+def date_str(d) -> str:
+    return str(d.date()) if hasattr(d, "date") else str(d)
+
+
+def resample_weekly(df: pd.DataFrame) -> Optional[pd.DataFrame]:
+    """Daily OHLCV -> weekly bars (week ending Friday), for the Trading
+    Scanner's Day/Week timeframe toggle. Weeks with no trading (holiday-only
+    weeks) never appear in daily data, so no explicit drop is needed. Every
+    window-based check downstream (SMA/EMA/high-low/VDU/VCP) just runs on
+    whatever bars it's handed — a week-count window on this output reads as
+    weeks the same way a day-count window reads as days on the daily df."""
+    if df is None or df.empty:
+        return None
+    agg = {"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"}
+    weekly = df.resample("W-FRI").agg(agg).dropna(subset=["Close"])
+    return weekly
+
+
 def sma(df: pd.DataFrame, window: int) -> Optional[pd.Series]:
     if not _has_enough_history(df, window):
         return None
@@ -36,10 +91,12 @@ def latest(series: Optional[pd.Series]) -> Optional[float]:
     return float(series.dropna().iloc[-1])
 
 
-def pct_above_52wk_low(df: pd.DataFrame) -> Optional[float]:
-    if not _has_enough_history(df, 200):
+def pct_above_52wk_low(df: pd.DataFrame, lookback_bars: int = 252, min_bars: int = 200) -> Optional[float]:
+    """`lookback_bars`/`min_bars` are expressed in the df's own bar unit — 252
+    trading days for a daily df, 52 weeks for a weekly df (both ~1 year)."""
+    if not _has_enough_history(df, min_bars):
         return None
-    window = df.tail(252)
+    window = df.tail(lookback_bars)
     low = window["Low"].min()
     price = df["Close"].iloc[-1]
     if low <= 0:
@@ -47,10 +104,10 @@ def pct_above_52wk_low(df: pd.DataFrame) -> Optional[float]:
     return float((price - low) / low * 100)
 
 
-def pct_below_52wk_high(df: pd.DataFrame) -> Optional[float]:
-    if not _has_enough_history(df, 200):
+def pct_below_52wk_high(df: pd.DataFrame, lookback_bars: int = 252, min_bars: int = 200) -> Optional[float]:
+    if not _has_enough_history(df, min_bars):
         return None
-    window = df.tail(252)
+    window = df.tail(lookback_bars)
     high = window["High"].max()
     price = df["Close"].iloc[-1]
     if high <= 0:
@@ -139,13 +196,18 @@ def volume_dry_up(
     return {"ratio_pct": round(ratio_pct, 2), "is_vdu": bool(ratio_pct <= max_ratio_pct)}
 
 
-def find_pivot_breakout(df: pd.DataFrame, base_window: int = 35, ema_span: int = 21) -> dict:
+def find_pivot_breakout(
+    df: pd.DataFrame, base_window: int = 35, ema_span: int = 21, slow_ema_span: int = 200
+) -> dict:
     """
     Simple pivot/breakout detector (Part 1 — entry timing overlay):
     - 'pivot' = the high of the most recent consolidation base (a `base_window`
-      day window where price has been range-bound relative to its own volatility)
+      bar window where price has been range-bound relative to its own volatility)
     - 'breakout' = True if the latest close clears the pivot on above-average
       volume
+    `base_window`/`ema_span`/`slow_ema_span` are in the df's own bar unit — pass
+    week-scaled values for a weekly df (see the Trading Scanner's Day/Week
+    toggle's weekly config).
     Returns a dict with pivot price, whether a breakout just fired, and the
     EMA trend state — degrades to all-None fields if there isn't enough history.
     """
@@ -162,7 +224,7 @@ def find_pivot_breakout(df: pd.DataFrame, base_window: int = 35, ema_span: int =
     breakout = bool(last_close >= pivot_price and last_vol > avg_vol * 1.3)
 
     e = ema(df, ema_span)
-    e200 = ema(df, 200) if _has_enough_history(df, 200) else None
+    e200 = ema(df, slow_ema_span) if _has_enough_history(df, slow_ema_span) else None
     if e is not None and len(e.dropna()) >= 2:
         slope_up = e.dropna().iloc[-1] > e.dropna().iloc[-5] if len(e.dropna()) >= 5 else None
         above_200 = None

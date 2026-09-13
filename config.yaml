@@ -21,6 +21,102 @@ trading:
     pct_above_52wk_low_min: 30
     pct_below_52wk_high_max: 25
     sma_trend_lookback_days: 21
+  # Weekly-timeframe equivalents for the Trading Scanner's Day/Week toggle.
+  # Same rules, re-expressed in week-sized windows: 10/30/40-week SMA in
+  # place of 50/150/200-day, a 52-week (not 252-day) high/low lookback, ~7-week
+  # base/pivot window in place of 35-day, and week-scaled VDU/liquidity/VCP
+  # windows. RS Rating is intentionally NOT re-scaled here — it's a fixed
+  # 12-month performance percentile, independent of chart timeframe, so both
+  # Day and Week modes rank against the same daily-computed RS Rating.
+  weekly:
+    trend_template:
+      fast_sma: 10
+      mid_sma: 30
+      slow_sma: 40
+      sma_trend_lookback_days: 4      # weeks
+      high_low_lookback_bars: 52      # weeks
+      high_low_min_bars: 40
+      pct_above_52wk_low_min: 30
+      pct_below_52wk_high_max: 25
+    pivot:
+      base_window: 7                  # weeks
+      ema_span: 4
+      slow_ema_span: 40
+    liquidity:
+      min_avg_volume_10d: 350000      # same share-count floor, averaged over `window_days` weeks instead of days
+      window_days: 2
+    entry_trigger:
+      vdu_recent_window_days: 1       # weeks
+      vdu_ma_window_days: 10
+      vdu_max_ratio_pct: 70.0
+    vcp:
+      lookback_days: 26               # weeks (~130 trading days)
+      final_contraction_vdu_max_ratio_pct: 50.0
+      vdu_ma_window: 10               # weeks, in place of the daily 50-day MA
+    patterns:
+      cup_with_handle:
+        lookback_bars: 68             # weeks (~340 trading days)
+        zigzag_pct_threshold: 12.0
+        min_cup_depth_pct: 12.0
+        max_cup_depth_pct: 50.0
+        ideal_max_cup_depth_pct: 35.0
+        min_cup_duration_bars: 7      # weeks
+        max_cup_duration_bars: 65
+        right_high_tolerance_pct: 10.0
+        prior_uptrend_min_pct: 30.0
+        prior_uptrend_lookback_bars: 26
+        handle_max_depth_pct: 15.0
+        handle_ideal_max_depth_pct: 12.0
+        min_handle_duration_bars: 1
+        max_handle_duration_bars: 5
+        handle_vdu_ma_window: 10
+        handle_vdu_max_ratio_pct: 70.0
+        breakout_volume_multiple: 1.4
+        allow_no_handle: true
+      flat_base:
+        lookback_bars: 26         # weeks
+        zigzag_pct_threshold: 8.0
+        max_depth_pct: 15.0
+        ideal_max_depth_pct: 10.0
+        min_duration_bars: 5      # weeks
+        max_duration_bars: 40
+        prior_uptrend_min_pct: 20.0
+        prior_uptrend_lookback_bars: 12
+        vdu_ma_window: 10
+        vdu_max_ratio_pct: 70.0
+        breakout_volume_multiple: 1.4
+      double_bottom:
+        lookback_bars: 40         # weeks
+        zigzag_pct_threshold: 10.0
+        min_depth_pct: 15.0
+        max_depth_pct: 50.0
+        min_duration_bars: 6      # weeks
+        max_duration_bars: 30
+        undercut_tolerance_pct: 1.0
+        prior_uptrend_min_pct: 25.0
+        prior_uptrend_lookback_bars: 20
+        vdu_ma_window: 10
+        breakout_volume_multiple: 1.4
+      ascending_base:
+        lookback_bars: 40         # weeks
+        zigzag_pct_threshold: 10.0
+        min_leg_depth_pct: 8.0
+        max_leg_depth_pct: 25.0
+        higher_low_buffer_pct: 0.5
+        higher_high_tolerance_pct: 3.0
+        min_legs: 3
+        vdu_ma_window: 10
+        breakout_volume_multiple: 1.4
+      high_tight_flag:
+        lookback_bars: 13         # weeks
+        zigzag_pct_threshold: 15.0
+        min_pole_pct: 90.0
+        max_pole_bars: 8          # weeks
+        min_flag_bars: 2          # weeks
+        max_flag_bars: 6
+        max_flag_depth_pct: 25.0
+        vdu_ma_window: 10
+        breakout_volume_multiple: 1.4
   # Stage 1 — Liquidity Filter: minimum tradability gate, checked before the
   # trend template even runs. Screens out illiquid names prone to wide
   # spreads / slippage on entry-exit.
@@ -45,10 +141,96 @@ trading:
   # threshold is stricter than the general Stage 4 VDU above (dry-up must be
   # deeper in the last, tightest wave); breakout_volume_multiple is the pivot
   # breakout day's required volume vs. its 50-day average.
+  #
+  # Structural rules (see src/trading/vcp.py docstring for the full
+  # Minervini rationale): equal_high_tolerance_pct is how close a new swing
+  # high can be to the prior one and still count as an "Equal High" retest
+  # rather than a base-invalidating Higher High; higher_low_buffer_pct is the
+  # same kind of small tolerance on the Low side (a new low must clear this
+  # buffer below the prior low to count as a base-invalidating Lower Low).
+  # standard_max_contractions / loose_base_contraction_threshold classify the
+  # wave count itself (1T = plain pullback, 2T-4T = standard, 5T = long base,
+  # 6T+ = too loose to trust). final_contraction_tight_max_pct /
+  # _ideal_max_pct grade how tight the LAST wave is before a breakout.
+  # Cup-with-Handle pattern detector (src/trading/patterns/cup_with_handle.py)
+  # — see that module's docstring for the O'Neil rule each threshold traces
+  # back to. Bar counts below are daily; the weekly equivalents are under
+  # trading.weekly.patterns.cup_with_handle further down.
+  patterns:
+    cup_with_handle:
+      lookback_bars: 340
+      zigzag_pct_threshold: 12.0
+      min_cup_depth_pct: 12.0
+      max_cup_depth_pct: 50.0
+      ideal_max_cup_depth_pct: 35.0
+      min_cup_duration_bars: 35
+      max_cup_duration_bars: 325
+      right_high_tolerance_pct: 10.0
+      prior_uptrend_min_pct: 30.0
+      prior_uptrend_lookback_bars: 130
+      handle_max_depth_pct: 15.0
+      handle_ideal_max_depth_pct: 12.0
+      min_handle_duration_bars: 5
+      max_handle_duration_bars: 25
+      handle_vdu_ma_window: 50
+      handle_vdu_max_ratio_pct: 70.0
+      breakout_volume_multiple: 1.4
+      allow_no_handle: true
+    flat_base:
+      lookback_bars: 130
+      zigzag_pct_threshold: 8.0
+      max_depth_pct: 15.0
+      ideal_max_depth_pct: 10.0
+      min_duration_bars: 25       # ~5 weeks
+      max_duration_bars: 200      # ~40 weeks
+      prior_uptrend_min_pct: 20.0
+      prior_uptrend_lookback_bars: 60
+      vdu_ma_window: 50
+      vdu_max_ratio_pct: 70.0
+      breakout_volume_multiple: 1.4
+    double_bottom:
+      lookback_bars: 200
+      zigzag_pct_threshold: 10.0
+      min_depth_pct: 15.0
+      max_depth_pct: 50.0
+      min_duration_bars: 30       # ~6 weeks
+      max_duration_bars: 150      # ~30 weeks
+      undercut_tolerance_pct: 1.0
+      prior_uptrend_min_pct: 25.0
+      prior_uptrend_lookback_bars: 100
+      vdu_ma_window: 50
+      breakout_volume_multiple: 1.4
+    ascending_base:
+      lookback_bars: 200
+      zigzag_pct_threshold: 10.0
+      min_leg_depth_pct: 8.0
+      max_leg_depth_pct: 25.0
+      higher_low_buffer_pct: 0.5
+      higher_high_tolerance_pct: 3.0
+      min_legs: 3
+      vdu_ma_window: 50
+      breakout_volume_multiple: 1.4
+    high_tight_flag:
+      lookback_bars: 60
+      zigzag_pct_threshold: 15.0
+      min_pole_pct: 90.0
+      max_pole_bars: 40           # ~8 weeks
+      min_flag_bars: 10           # ~2 weeks
+      max_flag_bars: 30           # ~6 weeks
+      max_flag_depth_pct: 25.0
+      vdu_ma_window: 50
+      breakout_volume_multiple: 1.4
+
   vcp:
     lookback_days: 130
     zigzag_pct_threshold: 8.0
     tightening_tolerance_pct: 3.0
+    equal_high_tolerance_pct: 2.0
+    higher_low_buffer_pct: 0.5
+    standard_max_contractions: 4
+    loose_base_contraction_threshold: 5
+    final_contraction_tight_max_pct: 12.0
+    final_contraction_ideal_max_pct: 5.0
     final_contraction_vdu_max_ratio_pct: 50.0
     breakout_volume_multiple: 1.5
     rs_line_lookback_days: 252

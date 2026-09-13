@@ -57,6 +57,44 @@ def get_price_history(ticker: str, ttl_hours: float = 6) -> Optional[pd.DataFram
         return None
 
 
+def get_price_history_long(ticker: str, years: int = 10, ttl_hours: float = 720) -> Optional[pd.DataFrame]:
+    """Long-history daily OHLCV for backtesting (src/trading/backtest.py) —
+    a separate cache namespace/TTL from the live scanner's 2y/6h series so a
+    30-day-old backtest snapshot never collides with (or gets evicted by) the
+    scanner's fast-refreshing cache. Same never-raises contract as
+    get_price_history."""
+
+    def fetch():
+        df = _retry(lambda: yf.Ticker(ticker).history(period=f"{years}y"))
+        if df is None or df.empty:
+            raise ValueError(f"empty long price history for {ticker}")
+        df = df.dropna(subset=["Close"])
+        if df.empty:
+            raise ValueError(f"empty long price history for {ticker} after dropping incomplete rows")
+        return df.reset_index().to_dict(orient="list")
+
+    try:
+        raw, _fresh = cached_fetch("trading_long", f"price_{years}y_{ticker}", ttl_hours, fetch)
+        df = pd.DataFrame(raw)
+        if "Date" in df.columns:
+            df["Date"] = pd.to_datetime(df["Date"], utc=True)
+            df = df.set_index("Date")
+        return df
+    except Exception:
+        return None
+
+
+def get_price_histories_long(
+    tickers: list[str], years: int = 10, ttl_hours: float = 720, max_workers: int = 16
+) -> dict[str, Optional[pd.DataFrame]]:
+    """Batch version of get_price_history_long — see get_price_histories."""
+    if not tickers:
+        return {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(executor.map(lambda t: get_price_history_long(t, years, ttl_hours), tickers))
+    return dict(zip(tickers, results))
+
+
 def get_price_histories(tickers: list[str], ttl_hours: float = 6, max_workers: int = 16) -> dict[str, Optional[pd.DataFrame]]:
     """Batch version of get_price_history — fetches many tickers concurrently
     (I/O-bound: network + per-ticker cache file, threads release the GIL

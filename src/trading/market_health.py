@@ -12,11 +12,15 @@ from src.trading import indicators as ind
 from src.trading import trend_template as tt
 
 
-def evaluate_market_health(ticker: str = "SPY", cfg: Optional[dict] = None) -> dict:
+def evaluate_market_health(ticker: str = "SPY", cfg: Optional[dict] = None, timeframe: str = "day") -> dict:
     """Returns the same shape as trend_template.evaluate_all, plus the ticker
     used, so Page 1 can render it directly and CANSLIM's 'M' check can reuse
-    match_pct without recomputation."""
+    match_pct without recomputation. `timeframe="week"` resamples to weekly
+    bars first — pass the matching week-scaled `cfg` (see the Trading
+    Scanner's Day/Week toggle and config.yaml's trading.weekly.trend_template)."""
     df = get_price_history(ticker)
+    if timeframe == "week":
+        df = ind.resample_weekly(df)
     if df is None or df.empty:
         return {"ticker": ticker, "results": {}, "match_pct": 0.0, "evaluated_pct": 0.0, "error": "no data"}
 

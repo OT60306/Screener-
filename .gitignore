@@ -11,3 +11,9 @@ streamlit_run.log
 build/
 dist/
 *.spec
+
+# Backtest run artifacts (backtest_trading.py output) — reproducible locally, not source
+out_backtest_*.csv
+backtest_*_full.log
+backtest_full_run.log
+build_log.txt

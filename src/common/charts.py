@@ -21,15 +21,24 @@ UP_COLOR = "#089981"
 DOWN_COLOR = "#F23645"
 
 
-def price_chart(df: pd.DataFrame, ticker: str, pivot_info: dict | None = None) -> go.Figure:
+def price_chart(
+    df: pd.DataFrame, ticker: str, pivot_info: dict | None = None,
+    ema_spans: tuple[int, int, int] = (50, 150, 200), display_bars: int = DISPLAY_DAYS,
+    timeframe_label: str = "1Y",
+) -> go.Figure:
     """One chart component used on Page 1 (index), Page 2 (scanner detail),
     and Page 3 (health report) — a single TradingView-style panel: candlestick
-    + 21/50/200 EMA + pivot/breakout marker on top, volume synced underneath.
-    White background, ~1 year visible, no pan/zoom/click interaction — render
-    with render_price_chart() below, not st.plotly_chart() directly, so every
-    caller gets the same static, fixed-window behavior."""
-    emas = {span: ind.ema(df, span) for span in (21, 50, 200)}  # computed on full history for accuracy...
-    display_df = df.tail(DISPLAY_DAYS)                           # ...then trimmed to the visible window
+    + EMA overlay + pivot/breakout marker on top, volume synced underneath.
+    White background, no pan/zoom/click interaction — render with
+    render_price_chart() below, not st.plotly_chart() directly, so every
+    caller gets the same static, fixed-window behavior. `ema_spans`/
+    `display_bars`/`timeframe_label` let a weekly-timeframe caller pass
+    week-scaled EMA spans and a shorter visible bar count (see the Trading
+    Scanner's Day/Week toggle) instead of the daily 50/150/200-day defaults —
+    matched to the Trend Template's own 50/150/200-day SMA windows so the
+    overlay lines up with what Stage 2's checklist is actually checking."""
+    emas = {span: ind.ema(df, span) for span in ema_spans}  # computed on full history for accuracy...
+    display_df = df.tail(display_bars)                       # ...then trimmed to the visible window
 
     fig = make_subplots(
         rows=2,
@@ -49,10 +58,10 @@ def price_chart(df: pd.DataFrame, ticker: str, pivot_info: dict | None = None) -
         row=1, col=1,
     )
 
-    for span, color in [(21, "#f2a900"), (50, "#4c78a8"), (200, "#54a24b")]:
+    for span, color in zip(ema_spans, ("#f2a900", "#4c78a8", "#54a24b")):
         e = emas[span]
         if e is not None:
-            e = e.tail(DISPLAY_DAYS)
+            e = e.tail(display_bars)
             fig.add_trace(
                 go.Scatter(x=e.index, y=e, mode="lines", name=f"EMA{span}", line=dict(width=1.3, color=color)),
                 row=1, col=1,
@@ -76,7 +85,7 @@ def price_chart(df: pd.DataFrame, ticker: str, pivot_info: dict | None = None) -
     )
 
     fig.update_layout(
-        title=dict(text=f"{ticker} — price / EMA / volume (1Y)", y=0.99, yanchor="top", x=0, xanchor="left",
+        title=dict(text=f"{ticker} — price / EMA / volume ({timeframe_label})", y=0.99, yanchor="top", x=0, xanchor="left",
                     font=dict(color="#000000")),
         xaxis_rangeslider_visible=False,
         height=560,
@@ -100,8 +109,15 @@ def price_chart(df: pd.DataFrame, ticker: str, pivot_info: dict | None = None) -
     return fig
 
 
-def render_price_chart(df: pd.DataFrame, ticker: str, pivot_info: dict | None = None) -> None:
+def render_price_chart(
+    df: pd.DataFrame, ticker: str, pivot_info: dict | None = None,
+    ema_spans: tuple[int, int, int] = (50, 150, 200), display_bars: int = DISPLAY_DAYS,
+    timeframe_label: str = "1Y",
+) -> None:
     """Builds and renders price_chart() with the fixed, non-interactive,
     white-background config every page should use — call this instead of
     st.plotly_chart(price_chart(...)) directly."""
-    st.plotly_chart(price_chart(df, ticker, pivot_info), width="stretch", config=PLOTLY_CONFIG)
+    st.plotly_chart(
+        price_chart(df, ticker, pivot_info, ema_spans, display_bars, timeframe_label),
+        width="stretch", config=PLOTLY_CONFIG,
+    )

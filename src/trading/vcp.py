@@ -14,19 +14,49 @@ duration as they tighten — a fixed window misses the later, tighter waves a
 a human chartist's read — treat the contraction count and depths as
 directional, not authoritative.
 
-Four things this adds beyond the existing Stage 4 checks:
+Five things this adds beyond the existing Stage 4 checks:
 1. Contraction count + per-wave depth %, and whether depths are
-   progressively tightening (1T/2T/3T-style read).
-2. Volume Dry-Up measured specifically in the FINAL contraction (not just a
+   progressively tightening (1T/2T/3T-style read) — built by walking the
+   swing legs forward and enforcing Minervini's structural rules (see
+   `detect_contractions`), not just trimming a trailing tightening run.
+2. Contraction-count validation: 1 wave is a plain pullback (not a VCP base
+   yet), 2-4 waves is the standard range, 5 is a long-but-acceptable base,
+   and 6+ waves means the base has gone on too long / is too loose to trust.
+3. Volume Dry-Up measured specifically in the FINAL contraction (not just a
    trailing N-day window) — VCP requires supply to dry up tightest right
    before the breakout, threshold <=50% of the 50-day average (stricter
-   than the general Stage 4 VDU's <=70%).
-3. RS Line new-high check: stock price relative to a benchmark (SPY),
+   than the general Stage 4 VDU's <=70%) — plus a final-contraction depth
+   check (tight <=12%, ideally <=5%).
+4. RS Line new-high check: stock price relative to a benchmark (SPY),
    distinct from the numeric 1-99 RS Rating used elsewhere — a market
    leader's RS Line should be making new highs alongside (or ahead of) price.
-4. Pivot = the final contraction's high, with breakout-day volume
+5. Pivot = the final contraction's high, with breakout-day volume
    confirmation at >1.5x the 50-day average (stricter than the general
    Stage 4 pocket-pivot confirmation's 1.4x).
+
+## Structural rules enforced by `detect_contractions` (Minervini price structure)
+
+**Low side (the most important rule):** each contraction's low must be a
+Higher Low than the low before it. A Lower Low is a strict violation — it
+invalidates the base being built (the base up to that point either failed or
+was never a real VCP), so the count resets and that leg becomes the new
+starting contraction (C1) of a fresh base.
+
+**High side:** an Equal High (retest of the same resistance) or a Lower High
+(supply fading, base compressing into a triangle/wedge shape) are both fine.
+A Higher High set *during* base formation is not allowed to extend the
+existing count — if price pushes above the prior high and can't hold,
+rolling back over into a deep pullback, that pullback is not counted as the
+next contraction of the old base; the new high resets the count and starts a
+fresh C1 instead.
+
+Both resets mean `detect_contractions` returns only the trailing run of legs
+that is internally consistent by these two rules — i.e. the base actually
+being built right now, not the stock's entire multi-month swing history.
+
+**Count validation** (`classify_contraction_count`) and **final-contraction
+tightness** (`final_contraction_tightness`) are then applied to that trailing
+run — see their docstrings.
 """
 from __future__ import annotations
 
@@ -34,44 +64,8 @@ from typing import Optional
 
 import pandas as pd
 
-
-def _find_swings(df: pd.DataFrame, pct_threshold: float = 5.0) -> list[dict]:
-    """ZigZag swing detection: tracks a running extreme (starting by looking
-    for a high), and confirms it as a swing point only once price reverses
-    by at least `pct_threshold`% from that extreme — then flips to tracking
-    the opposite extreme. Standard technique; adapts to shrinking wave sizes
-    naturally since the threshold is relative, not a fixed day count."""
-    n = len(df)
-    if n == 0:
-        return []
-    highs, lows = df["High"], df["Low"]
-
-    swings: list[dict] = []
-    looking_for_high = True
-    ext_idx, ext_price = 0, float(highs.iloc[0])
-
-    for i in range(1, n):
-        hi, lo = float(highs.iloc[i]), float(lows.iloc[i])
-        if looking_for_high:
-            if hi > ext_price:
-                ext_idx, ext_price = i, hi
-            elif ext_price > 0 and (ext_price - lo) / ext_price * 100 >= pct_threshold:
-                swings.append({"idx": ext_idx, "date": df.index[ext_idx], "price": ext_price, "type": "high"})
-                looking_for_high = False
-                ext_idx, ext_price = i, lo
-        else:
-            if lo < ext_price:
-                ext_idx, ext_price = i, lo
-            elif ext_price > 0 and (hi - ext_price) / ext_price * 100 >= pct_threshold:
-                swings.append({"idx": ext_idx, "date": df.index[ext_idx], "price": ext_price, "type": "low"})
-                looking_for_high = True
-                ext_idx, ext_price = i, hi
-
-    return swings
-
-
-def _date_str(d) -> str:
-    return str(d.date()) if hasattr(d, "date") else str(d)
+from src.trading.indicators import find_swings as _find_swings
+from src.trading.indicators import date_str as _date_str
 
 
 def detect_contractions(
@@ -79,19 +73,31 @@ def detect_contractions(
     lookback_days: int = 130,
     zigzag_pct_threshold: float = 8.0,
     tightening_tolerance_pct: float = 3.0,
+    equal_high_tolerance_pct: float = 2.0,
+    higher_low_buffer_pct: float = 0.5,
 ) -> list[dict]:
     """Finds every high->low swing leg within the trailing `lookback_days`,
-    then keeps only the TRAILING run where each wave is progressively
-    tighter than (or close to) the one before it — walking backward from the
-    most recent wave and stopping at the first one that breaks the
-    tightening pattern.
+    then walks them forward enforcing Minervini's two structural rules,
+    keeping only the TRAILING run that is currently intact:
+
+    - **No Lower Low**: a leg whose low sits below the previous contraction's
+      low (beyond `higher_low_buffer_pct`, a small buffer for float/tick
+      noise) invalidates everything built so far. The base resets and that
+      leg becomes the new C1.
+    - **No Higher High during base formation**: a leg whose high sits above
+      the previous contraction's high (beyond `equal_high_tolerance_pct`,
+      which is what allows a same-level retest to still count as an Equal
+      High) means price broke out of the base shape and rolled over — that
+      leg is not the next wave of the old base, it resets the count and
+      becomes the new C1 instead. A Lower High or Equal High is always fine
+      and simply continues the count.
 
     This is deliberately not "every contraction since the base's origin
     peak": VCP wave counting is about the recent structure right before a
     possible breakout, not a stock's entire multi-month swing history — a
     volatile name can have many legs over months without ever forming a
-    proper tightening base, and only the last few progressively-smaller
-    waves are what actually matter for a breakout call."""
+    proper base, and only the trailing run that hasn't been invalidated by
+    either rule is what actually matters for a breakout call."""
     if df is None or df.empty or len(df) < 20:
         return []
     window_df = df.tail(lookback_days)
@@ -112,21 +118,29 @@ def detect_contractions(
     if not all_legs:
         return []
 
-    trailing = [all_legs[-1]]
-    for leg in reversed(all_legs[:-1]):
-        if leg["depth_pct"] >= trailing[0]["depth_pct"] - tightening_tolerance_pct:
-            trailing.insert(0, leg)
+    base: list[dict] = [dict(all_legs[0])]
+    for leg in all_legs[1:]:
+        prev = base[-1]
+        is_lower_low = leg["low"] < prev["low"] * (1 - higher_low_buffer_pct / 100)
+        is_higher_high = leg["high"] > prev["high"] * (1 + equal_high_tolerance_pct / 100)
+        if is_lower_low or is_higher_high:
+            # Pattern invalidated (Lower Low) or price broke out and failed
+            # to hold (Higher High mid-base) — this leg starts a fresh base.
+            base = [dict(leg)]
         else:
-            break
+            base.append(dict(leg))
 
-    for i, leg in enumerate(trailing):
+    for i, leg in enumerate(base):
         leg["wave"] = i + 1
-    return trailing
+    return base
 
 
 def is_progressive_tightening(contractions: list[dict], tolerance_pct: float = 3.0) -> Optional[bool]:
     """True if each successive contraction's depth % is smaller than the
-    previous one (allowing a small tolerance for near-ties)."""
+    previous one (allowing a small tolerance for near-ties). This is a
+    quality read on the trailing run `detect_contractions` already built
+    (which enforces the HL/no-HH structural rules) — a base can be
+    structurally valid by those rules yet still not be tightening well."""
     if len(contractions) < 2:
         return None
     depths = [c["depth_pct"] for c in contractions]
@@ -136,6 +150,46 @@ def is_progressive_tightening(contractions: list[dict], tolerance_pct: float = 3
 def contraction_count_label(contractions: list[dict]) -> str:
     n = len(contractions)
     return f"{n}T" if n else "none detected"
+
+
+def classify_contraction_count(
+    contractions: list[dict], standard_max: int = 4, loose_threshold: int = 5
+) -> dict:
+    """Validates the wave count itself, per Minervini's guidance:
+    - 0 waves: no contraction structure detected at all.
+    - 1 wave (1T): just an ordinary pullback — not a VCP base yet.
+    - 2-4 waves (2T-4T): the standard, tradeable range.
+    - exactly `loose_threshold` (default 5T): a long base — still usable but
+      flag it as running long.
+    - more than `loose_threshold`: the base has been forming too long / is
+      too loose to trust — skip the trade.
+    """
+    n = len(contractions)
+    if n == 0:
+        return {"count": 0, "label": "none detected", "classification": "no_contraction"}
+    if n == 1:
+        return {"count": 1, "label": "1T", "classification": "pullback_only"}
+    if n > loose_threshold:
+        return {"count": n, "label": f"{n}T", "classification": "too_loose"}
+    if n == loose_threshold:
+        return {"count": n, "label": f"{n}T", "classification": "long_base"}
+    return {"count": n, "label": f"{n}T", "classification": "valid_vcp"}
+
+
+def final_contraction_tightness(
+    contractions: list[dict], tight_max_pct: float = 12.0, ideal_max_pct: float = 5.0
+) -> dict:
+    """The last contraction going into a breakout should be the tightest one
+    in the base — pass at <=12% depth, with <=5% considered the ideal,
+    tightest-possible setup."""
+    if not contractions:
+        return {"depth_pct": None, "is_tight_enough": None, "is_ideal": None}
+    depth = contractions[-1]["depth_pct"]
+    return {
+        "depth_pct": depth,
+        "is_tight_enough": bool(depth <= tight_max_pct),
+        "is_ideal": bool(depth <= ideal_max_pct),
+    }
 
 
 def final_contraction_vdu(
@@ -199,33 +253,49 @@ def vcp_analysis(
     lookback_days = cfg.get("lookback_days", 130)
     zigzag_pct_threshold = cfg.get("zigzag_pct_threshold", 8.0)
     tightening_tolerance_pct = cfg.get("tightening_tolerance_pct", 3.0)
+    equal_high_tolerance_pct = cfg.get("equal_high_tolerance_pct", 2.0)
+    higher_low_buffer_pct = cfg.get("higher_low_buffer_pct", 0.5)
     vdu_max_ratio_pct = cfg.get("final_contraction_vdu_max_ratio_pct", 50.0)
+    final_tight_max_pct = cfg.get("final_contraction_tight_max_pct", 12.0)
+    final_ideal_max_pct = cfg.get("final_contraction_ideal_max_pct", 5.0)
+    standard_max_count = cfg.get("standard_max_contractions", 4)
+    loose_count_threshold = cfg.get("loose_base_contraction_threshold", 5)
     breakout_vol_multiple = cfg.get("breakout_volume_multiple", 1.5)
     rs_line_lookback_days = cfg.get("rs_line_lookback_days", 252)
     market_leader_rs_min = cfg.get("market_leader_rs_min", 90)
+    vdu_ma_window = cfg.get("vdu_ma_window", 50)
 
     if df is None or df.empty:
         return {
             "contractions": [], "contraction_count_label": "no data", "progressive_tightening": None,
+            "count_validation": {"count": 0, "label": "no data", "classification": "no_contraction"},
+            "final_contraction_tightness": {"depth_pct": None, "is_tight_enough": None, "is_ideal": None},
             "final_contraction_vdu": {"ratio_pct": None, "is_vdu": None}, "pivot_price": None,
             "breakout": None, "breakout_volume_confirmed": None, "rs_line_new_high": None,
             "rs_rating": rs_value, "market_leader": None,
         }
 
     window_df = df.tail(lookback_days)
-    contractions = detect_contractions(df, lookback_days, zigzag_pct_threshold, tightening_tolerance_pct)
+    contractions = detect_contractions(
+        df, lookback_days, zigzag_pct_threshold, tightening_tolerance_pct,
+        equal_high_tolerance_pct, higher_low_buffer_pct,
+    )
     tightening = is_progressive_tightening(contractions, tightening_tolerance_pct)
-    vdu = final_contraction_vdu(window_df, contractions, 50, vdu_max_ratio_pct)
+    count_validation = classify_contraction_count(contractions, standard_max_count, loose_count_threshold)
+    tightness = final_contraction_tightness(contractions, final_tight_max_pct, final_ideal_max_pct)
+    vdu = final_contraction_vdu(window_df, contractions, vdu_ma_window, vdu_max_ratio_pct)
 
     pivot_price = contractions[-1]["high"] if contractions else None
     latest_close = float(df["Close"].iloc[-1])
     breakout = bool(pivot_price is not None and latest_close >= pivot_price)
-    breakout_vol = breakout_volume_confirmed(df, breakout_vol_multiple) if breakout else None
+    breakout_vol = breakout_volume_confirmed(df, breakout_vol_multiple, vdu_ma_window) if breakout else None
 
     return {
         "contractions": contractions,
         "contraction_count_label": contraction_count_label(contractions),
         "progressive_tightening": tightening,
+        "count_validation": count_validation,
+        "final_contraction_tightness": tightness,
         "final_contraction_vdu": vdu,
         "pivot_price": pivot_price,
         "breakout": breakout,
