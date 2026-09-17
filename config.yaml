@@ -51,6 +51,8 @@ trading:
       vdu_max_ratio_pct: 70.0
     vcp:
       lookback_days: 26               # weeks (~130 trading days)
+      final_contraction_tight_max_pct: 10.0
+      final_contraction_ideal_max_pct: 5.0
       final_contraction_vdu_max_ratio_pct: 50.0
       vdu_ma_window: 10               # weeks, in place of the daily 50-day MA
     patterns:
@@ -71,6 +73,8 @@ trading:
         max_handle_duration_bars: 5
         handle_vdu_ma_window: 10
         handle_vdu_max_ratio_pct: 70.0
+        handle_final_leg_max_pct: 10.0       # final tight+VDU leg gate (rule 9) — ~9-10% max range
+        handle_final_leg_vdu_max_ratio_pct: 50.0
         breakout_volume_multiple: 1.4
         allow_no_handle: true
       flat_base:
@@ -84,6 +88,9 @@ trading:
         prior_uptrend_lookback_bars: 12
         vdu_ma_window: 10
         vdu_max_ratio_pct: 70.0
+        final_leg_lookback_bars: 4            # tail-end-of-base tight+VDU gate (rule 5)
+        final_leg_max_pct: 10.0
+        final_leg_vdu_max_ratio_pct: 50.0
         breakout_volume_multiple: 1.4
       double_bottom:
         lookback_bars: 40         # weeks
@@ -96,6 +103,8 @@ trading:
         prior_uptrend_min_pct: 25.0
         prior_uptrend_lookback_bars: 20
         vdu_ma_window: 10
+        final_leg_max_pct: 10.0              # final tight+VDU leg gate (rule 6) — ~9-10% max range
+        final_leg_vdu_max_ratio_pct: 50.0
         breakout_volume_multiple: 1.4
       ascending_base:
         lookback_bars: 40         # weeks
@@ -106,6 +115,8 @@ trading:
         higher_high_tolerance_pct: 3.0
         min_legs: 3
         vdu_ma_window: 10
+        final_leg_max_pct: 10.0              # final tight+VDU leg gate (rule 6) — ~9-10% max range
+        final_leg_vdu_max_ratio_pct: 50.0
         breakout_volume_multiple: 1.4
       high_tight_flag:
         lookback_bars: 13         # weeks
@@ -116,6 +127,8 @@ trading:
         max_flag_bars: 6
         max_flag_depth_pct: 25.0
         vdu_ma_window: 10
+        final_leg_max_pct: 10.0              # flag-itself tight+VDU gate (rule 4)
+        final_leg_vdu_max_ratio_pct: 50.0
         breakout_volume_multiple: 1.4
   # Stage 1 — Liquidity Filter: minimum tradability gate, checked before the
   # trend template even runs. Screens out illiquid names prone to wide
@@ -151,7 +164,11 @@ trading:
   # standard_max_contractions / loose_base_contraction_threshold classify the
   # wave count itself (1T = plain pullback, 2T-4T = standard, 5T = long base,
   # 6T+ = too loose to trust). final_contraction_tight_max_pct /
-  # _ideal_max_pct grade how tight the LAST wave is before a breakout.
+  # _ideal_max_pct grade how tight the LAST wave is before a breakout — the
+  # last leg should be a very tight, volume-dried-up squeeze (<=~9-10%,
+  # tightened from a looser 12% default), same ceiling used for the
+  # handle_final_leg_max_pct / final_leg_max_pct gates below on a cup's
+  # handle and a double bottom's post-low2 leg.
   # Cup-with-Handle pattern detector (src/trading/patterns/cup_with_handle.py)
   # — see that module's docstring for the O'Neil rule each threshold traces
   # back to. Bar counts below are daily; the weekly equivalents are under
@@ -174,6 +191,8 @@ trading:
       max_handle_duration_bars: 25
       handle_vdu_ma_window: 50
       handle_vdu_max_ratio_pct: 70.0
+      handle_final_leg_max_pct: 10.0       # final tight+VDU leg gate (rule 9) — ~9-10% max range
+      handle_final_leg_vdu_max_ratio_pct: 50.0
       breakout_volume_multiple: 1.4
       allow_no_handle: true
     flat_base:
@@ -187,6 +206,9 @@ trading:
       prior_uptrend_lookback_bars: 60
       vdu_ma_window: 50
       vdu_max_ratio_pct: 70.0
+      final_leg_lookback_bars: 10           # tail-end-of-base tight+VDU gate (rule 5)
+      final_leg_max_pct: 10.0
+      final_leg_vdu_max_ratio_pct: 50.0
       breakout_volume_multiple: 1.4
     double_bottom:
       lookback_bars: 200
@@ -199,6 +221,8 @@ trading:
       prior_uptrend_min_pct: 25.0
       prior_uptrend_lookback_bars: 100
       vdu_ma_window: 50
+      final_leg_max_pct: 10.0              # final tight+VDU leg gate (rule 6) — ~9-10% max range
+      final_leg_vdu_max_ratio_pct: 50.0
       breakout_volume_multiple: 1.4
     ascending_base:
       lookback_bars: 200
@@ -209,6 +233,8 @@ trading:
       higher_high_tolerance_pct: 3.0
       min_legs: 3
       vdu_ma_window: 50
+      final_leg_max_pct: 10.0              # final tight+VDU leg gate (rule 6) — ~9-10% max range
+      final_leg_vdu_max_ratio_pct: 50.0
       breakout_volume_multiple: 1.4
     high_tight_flag:
       lookback_bars: 60
@@ -219,6 +245,8 @@ trading:
       max_flag_bars: 30           # ~6 weeks
       max_flag_depth_pct: 25.0
       vdu_ma_window: 50
+      final_leg_max_pct: 10.0              # flag-itself tight+VDU gate (rule 4)
+      final_leg_vdu_max_ratio_pct: 50.0
       breakout_volume_multiple: 1.4
 
   vcp:
@@ -229,7 +257,7 @@ trading:
     higher_low_buffer_pct: 0.5
     standard_max_contractions: 4
     loose_base_contraction_threshold: 5
-    final_contraction_tight_max_pct: 12.0
+    final_contraction_tight_max_pct: 10.0
     final_contraction_ideal_max_pct: 5.0
     final_contraction_vdu_max_ratio_pct: 50.0
     breakout_volume_multiple: 1.5

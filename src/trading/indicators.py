@@ -246,3 +246,134 @@ def find_pivot_breakout(
         latest_close=last_close,
     )
     return result
+
+
+def prior_uptrend_pct(
+    df: pd.DataFrame,
+    ref_idx: int,
+    lookback_bars: int,
+    ref_price: Optional[float] = None,
+) -> Optional[float]:
+    """% rise from the lowest low in the `lookback_bars` window immediately
+    before `ref_idx`, up to a reference high price — the "prior uptrend"
+    gate shared by the cup_with_handle, double_bottom, and flat_base pattern
+    detectors in src/trading/patterns/ (was previously copy-pasted in each).
+    `ref_price` defaults to the High at `ref_idx`; pass an explicit value
+    when the caller needs a different anchor (e.g. double_bottom widens it
+    to a small window around its left low)."""
+    start = max(0, ref_idx - lookback_bars)
+    if start >= ref_idx:
+        return None
+    window = df.iloc[start:ref_idx]
+    if window.empty:
+        return None
+    prior_low = float(window["Low"].min())
+    if ref_price is None:
+        ref_price = float(df["High"].iloc[ref_idx])
+    if prior_low <= 0:
+        return None
+    return (ref_price - prior_low) / prior_low * 100
+
+
+def breakout_state(
+    df: pd.DataFrame,
+    pivot_price: Optional[float],
+    vol_ma_window: int,
+    breakout_vol_multiple: float,
+) -> dict:
+    """Shared breakout/volume-confirmation check used by every pattern
+    detector in src/trading/patterns/ (ascending_base, double_bottom,
+    flat_base, high_tight_flag, cup_with_handle) — was previously
+    copy-pasted in each of those files. `breakout` = last close at/above
+    pivot; `breakout_volume_confirmed` = None unless there's a breakout, in
+    which case it's whether last volume cleared `vol_ma_window`-day average
+    volume by `breakout_vol_multiple`."""
+    latest_close = float(df["Close"].iloc[-1])
+    last_vol = float(df["Volume"].iloc[-1])
+    avg_vol = df["Volume"].tail(vol_ma_window).mean() if len(df) >= vol_ma_window else None
+    breakout = bool(pivot_price and latest_close >= pivot_price)
+    breakout_volume_confirmed = (
+        bool(avg_vol and avg_vol > 0 and last_vol > avg_vol * breakout_vol_multiple) if breakout else None
+    )
+    return {
+        "latest_close": latest_close,
+        "last_vol": last_vol,
+        "avg_vol": avg_vol,
+        "breakout": breakout,
+        "breakout_volume_confirmed": breakout_volume_confirmed,
+    }
+
+
+def segment_vdu(df: pd.DataFrame, seg_start_idx: int, seg_end_idx: int, ma_window: int, max_ratio_pct: float) -> dict:
+    """Average volume across [seg_start_idx, seg_end_idx] (df-local, inclusive)
+    vs. the trailing `ma_window`-bar average ending at seg_end_idx. Same
+    convention as `volume_dry_up` but for an arbitrary historical segment
+    instead of always the trailing N bars — needed to check VDU specifically
+    over a handle, a post-low2 leg, or any other named segment rather than
+    just "the last 5 days". Shared by cup_with_handle.py, double_bottom.py,
+    and (via `final_leg_readiness` below) every other pattern detector that
+    needs a "was volume dry over this specific stretch" check."""
+    if df is None or df.empty or seg_end_idx < ma_window - 1 or seg_end_idx < seg_start_idx:
+        return {"ratio_pct": None, "is_vdu": None}
+    ma_vol = df["Volume"].iloc[max(0, seg_end_idx - ma_window + 1): seg_end_idx + 1].mean()
+    if ma_vol <= 0:
+        return {"ratio_pct": None, "is_vdu": None}
+    segment = df["Volume"].iloc[seg_start_idx: seg_end_idx + 1]
+    if segment.empty:
+        return {"ratio_pct": None, "is_vdu": None}
+    ratio_pct = float(segment.mean() / ma_vol * 100)
+    return {"ratio_pct": round(ratio_pct, 2), "is_vdu": bool(ratio_pct <= max_ratio_pct)}
+
+
+def final_leg_readiness(
+    df: pd.DataFrame,
+    seg_start_idx: int,
+    seg_end_idx: int,
+    tight_max_pct: float = 10.0,
+    vdu_ma_window: int = 50,
+    vdu_max_ratio_pct: float = 50.0,
+) -> dict:
+    """The "coiled spring right before breakout" check: the very last leg
+    going into a breakout — VCP's final contraction, a cup's handle, or a
+    double bottom's post-low2 leg back up toward the pivot — should be tight
+    AND volume-dry at the same time, not just one or the other. Requested
+    criterion: that final leg's own high-low range should not exceed
+    ~9-10% (default `tight_max_pct=10.0`), and volume over that same window
+    should have dried up vs. the trailing average (reuses `segment_vdu`,
+    defaulting to VCP's stricter 50% ratio rather than the general 70% Stage
+    4 threshold, since this is specifically checking for the *tightest,
+    driest* leg of the whole base — the last squeeze before price actually
+    breaks out — not just "some" dry-up anywhere in the base).
+
+    `is_ready` is True only when both the tightness and VDU checks pass;
+    it's None (not False) when there isn't enough history to know either
+    one, so callers don't mistake "unknown" for "failed". This also applies
+    to the segment's own length: a 1-2 bar "final leg" is too short to say
+    anything meaningful about its range or volume (a single quiet day can
+    look "tight and dry" by pure chance), so segments shorter than
+    `MIN_SEGMENT_BARS` return unknown rather than a possibly false-positive
+    is_ready=True."""
+    MIN_SEGMENT_BARS = 3
+    not_enough = {
+        "depth_pct": None, "is_tight": None,
+        "volume_dry_up": {"ratio_pct": None, "is_vdu": None}, "is_ready": None,
+    }
+    if df is None or df.empty or seg_end_idx < seg_start_idx:
+        return not_enough
+    segment = df.iloc[seg_start_idx: seg_end_idx + 1]
+    if segment.empty or len(segment) < MIN_SEGMENT_BARS:
+        return not_enough
+    seg_high = float(segment["High"].max())
+    seg_low = float(segment["Low"].min())
+    if seg_high <= 0:
+        return not_enough
+    depth_pct = (seg_high - seg_low) / seg_high * 100
+    is_tight = bool(depth_pct <= tight_max_pct)
+    vdu = segment_vdu(df, seg_start_idx, seg_end_idx, vdu_ma_window, vdu_max_ratio_pct)
+    is_ready = bool(is_tight and vdu["is_vdu"]) if vdu["is_vdu"] is not None else None
+    return {
+        "depth_pct": round(depth_pct, 2),
+        "is_tight": is_tight,
+        "volume_dry_up": vdu,
+        "is_ready": is_ready,
+    }

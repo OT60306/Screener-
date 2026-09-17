@@ -36,6 +36,19 @@ Rules encoded, each traceable to a specific annotation in the source PDF:
    (explicitly shown as "Cup without handle" on the Chrysler chart) — this
    detector reports that case too rather than rejecting it, controlled by
    `allow_no_handle` in cfg.
+9. Final-leg readiness (added on top of (5)/(6) above, same spirit as
+   vcp.py's final-contraction check) — the segment from the cup's right rim
+   to the latest bar (the handle, or the still-forming stretch when no
+   handle has appeared yet) must, on its own, be TIGHT (high-low range
+   <=`handle_final_leg_max_pct`, default ~9-10%) AND show volume dry-up
+   over that same stretch (`handle_final_leg_vdu_max_ratio_pct`, default
+   50% — stricter than the general handle VDU check in (6), which only
+   requires *some* dry-up). This is deliberately a second, stricter gate on
+   top of (5)'s retracement-depth rule: a handle can retrace a modest % from
+   the rim (passing (5)) yet still be too wide/choppy in absolute range, or
+   still trading on elevated volume, to be the actual final coiled-spring
+   leg right before breakout — this flags that distinction explicitly via
+   `final_leg_ready` rather than leaving it implicit in the depth number.
 """
 from __future__ import annotations
 
@@ -44,39 +57,6 @@ from typing import Optional
 import pandas as pd
 
 from src.trading import indicators as ind
-
-
-def _prior_uptrend_pct(df: pd.DataFrame, left_high_idx: int, lookback_bars: int) -> Optional[float]:
-    """% rise from the lowest low in the `lookback_bars` window immediately
-    before the cup's left rim, up to the left rim's high — the "prior
-    uptrend" gate."""
-    start = max(0, left_high_idx - lookback_bars)
-    if start >= left_high_idx:
-        return None
-    window = df.iloc[start:left_high_idx]
-    if window.empty:
-        return None
-    prior_low = float(window["Low"].min())
-    left_high_price = float(df["High"].iloc[left_high_idx])
-    if prior_low <= 0:
-        return None
-    return (left_high_price - prior_low) / prior_low * 100
-
-
-def _segment_vdu(df: pd.DataFrame, seg_start_idx: int, seg_end_idx: int, ma_window: int, max_ratio_pct: float) -> dict:
-    """Average volume across [seg_start_idx, seg_end_idx] vs. the trailing
-    `ma_window`-bar average ending at seg_end_idx — same VDU logic as
-    vcp.py's final_contraction_vdu, generalized to an arbitrary segment."""
-    if seg_end_idx < ma_window:
-        return {"ratio_pct": None, "is_vdu": None}
-    ma_vol = df["Volume"].iloc[max(0, seg_end_idx - ma_window + 1): seg_end_idx + 1].mean()
-    if ma_vol <= 0:
-        return {"ratio_pct": None, "is_vdu": None}
-    segment = df["Volume"].iloc[seg_start_idx: seg_end_idx + 1]
-    if segment.empty:
-        return {"ratio_pct": None, "is_vdu": None}
-    ratio_pct = float(segment.mean() / ma_vol * 100)
-    return {"ratio_pct": round(ratio_pct, 2), "is_vdu": bool(ratio_pct <= max_ratio_pct)}
 
 
 def detect_cup_with_handle(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict:
@@ -107,6 +87,8 @@ def detect_cup_with_handle(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict
     max_handle_bars = cfg.get("max_handle_duration_bars", 25)
     handle_vdu_ma_window = cfg.get("handle_vdu_ma_window", 50)
     handle_vdu_max_ratio = cfg.get("handle_vdu_max_ratio_pct", 70.0)
+    handle_final_leg_max_pct = cfg.get("handle_final_leg_max_pct", 10.0)
+    handle_final_leg_vdu_max_ratio = cfg.get("handle_final_leg_vdu_max_ratio_pct", 50.0)
     breakout_vol_multiple = cfg.get("breakout_volume_multiple", 1.4)
     allow_no_handle = cfg.get("allow_no_handle", True)
 
@@ -141,7 +123,7 @@ def detect_cup_with_handle(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict
             continue  # right side never recovered near the old high — cup incomplete
 
         left_high_df_idx = a["idx"] + offset
-        prior_pct = _prior_uptrend_pct(df, left_high_df_idx, prior_uptrend_lookback)
+        prior_pct = ind.prior_uptrend_pct(df, left_high_df_idx, prior_uptrend_lookback)
         if prior_pct is not None and prior_pct < prior_uptrend_min:
             continue  # no real prior advance — not a base worth buying
 
@@ -170,6 +152,14 @@ def detect_cup_with_handle(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict
     remaining = swings[best["c_swing_idx"] + 1:]
     handle_low_swing = next((s for s in remaining if s["type"] == "low"), None)
 
+    # Final-leg readiness (rule 9): the whole rim-to-latest-bar stretch,
+    # whether or not it has produced a distinct handle swing yet — checked
+    # once so both branches below (handle found / still no handle) share it.
+    final_leg = ind.final_leg_readiness(
+        df, right_high_idx, len(df) - 1,
+        handle_final_leg_max_pct, handle_vdu_ma_window, handle_final_leg_vdu_max_ratio,
+    )
+
     if handle_low_swing is not None:
         handle_low_idx = handle_low_swing["idx"] + offset
         handle_low_price = handle_low_swing["price"]
@@ -183,7 +173,7 @@ def detect_cup_with_handle(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict
         # the rim until the actual breakout is the whole point of the pattern.
         pivot_price = c["price"]
         handle_duration_bars = (len(df) - 1) - right_high_idx
-        vdu = _segment_vdu(df, right_high_idx, len(df) - 1, handle_vdu_ma_window, handle_vdu_max_ratio)
+        vdu = ind.segment_vdu(df, right_high_idx, len(df) - 1, handle_vdu_ma_window, handle_vdu_max_ratio)
 
         if handle_depth_pct is not None and handle_depth_pct > handle_max_depth:
             quality_flags.append(f"handle too deep ({handle_depth_pct:.1f}% > {handle_max_depth:.0f}%)")
@@ -197,6 +187,12 @@ def detect_cup_with_handle(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict
             quality_flags.append("handle running long — base may be getting stale")
         if vdu.get("is_vdu") is False:
             quality_flags.append("no volume dry-up in the handle — supply hasn't calmed down yet")
+        if final_leg["is_ready"] is False:
+            quality_flags.append(
+                f"handle not yet in the final tight, volume-dried-up leg (range {final_leg['depth_pct']}% "
+                f"vs {handle_final_leg_max_pct:.0f}% max, VDU {final_leg['volume_dry_up']['ratio_pct']}% "
+                f"vs {handle_final_leg_vdu_max_ratio:.0f}% max) — likely still basing, not an imminent breakout"
+            )
 
         handle = {
             "low": round(handle_low_price, 2), "low_date": ind.date_str(df.index[handle_low_idx]),
@@ -204,21 +200,24 @@ def detect_cup_with_handle(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict
             "in_upper_half": in_upper_half,
             "duration_bars": handle_duration_bars,
             "volume_dry_up": vdu,
+            "final_leg": final_leg,
         }
     else:
         pivot_price = c["price"]
         if allow_no_handle:
             quality_flags.append("no handle formed — valid O'Neil pattern (\"cup without handle\") but less common")
+            if final_leg["is_ready"] is False:
+                quality_flags.append(
+                    f"post-rim action not yet tight/volume-dried-up either (range {final_leg['depth_pct']}% "
+                    f"vs {handle_final_leg_max_pct:.0f}% max, VDU {final_leg['volume_dry_up']['ratio_pct']}% "
+                    f"vs {handle_final_leg_vdu_max_ratio:.0f}% max) — not an imminent breakout signal yet"
+                )
         else:
             return not_found
 
-    latest_close = float(df["Close"].iloc[-1])
-    avg_vol = df["Volume"].tail(handle_vdu_ma_window).mean() if len(df) >= handle_vdu_ma_window else None
-    last_vol = float(df["Volume"].iloc[-1])
-    breakout = bool(pivot_price and latest_close >= pivot_price)
-    breakout_volume_confirmed = (
-        bool(avg_vol and avg_vol > 0 and last_vol > avg_vol * breakout_vol_multiple) if breakout else None
-    )
+    bstate = ind.breakout_state(df, pivot_price, handle_vdu_ma_window, breakout_vol_multiple)
+    breakout = bstate["breakout"]
+    breakout_volume_confirmed = bstate["breakout_volume_confirmed"]
 
     return {
         "found": True,
@@ -236,5 +235,6 @@ def detect_cup_with_handle(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict
         "pivot_price": round(pivot_price, 2) if pivot_price else None,
         "breakout": breakout,
         "breakout_volume_confirmed": breakout_volume_confirmed,
+        "final_leg_ready": final_leg["is_ready"],
         "quality_flags": quality_flags,
     }

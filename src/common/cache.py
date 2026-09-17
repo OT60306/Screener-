@@ -85,10 +85,17 @@ def cached_fetch(
 
     try:
         value = fetch_fn()
-        set_cached(namespace, key, value)
-        return value, True
     except Exception:
         stale = get_cached_even_if_stale(namespace, key)
         if stale is not None:
             return stale, False
         raise
+
+    # A failure to persist the cache (disk full, permissions, ...) must not
+    # be mistaken for a failed fetch — we already have fresh data in hand,
+    # so return it even if we couldn't write it to disk.
+    try:
+        set_cached(namespace, key, value)
+    except Exception:
+        pass
+    return value, True

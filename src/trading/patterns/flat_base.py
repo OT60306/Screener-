@@ -21,6 +21,15 @@ Rules encoded:
    on the Apple and Netflix charts in the PDF) and <= `max_duration_bars`.
 4. Pivot = the base's high; breakout requires a volume-confirmed close at or
    above it, same convention as every other detector here.
+5. Final-leg readiness (same spirit as vcp.py's final-contraction check,
+   cup_with_handle.py's rule 9, and double_bottom.py's rule 6): unlike those
+   patterns, a flat base has no internal swing marking a distinct "last leg"
+   — it's one continuous sideways stretch — so this checks the trailing
+   `final_leg_lookback_bars` bars of the base (default 10) for the same
+   TIGHT (<= `final_leg_max_pct`) + volume-dry-up (`final_leg_vdu_max_ratio_pct`)
+   combination, on top of the whole-base depth/VDU checks above (which only
+   look at averages/full-range over the whole base, not specifically its
+   tail end right before a possible breakout).
 """
 from __future__ import annotations
 
@@ -29,20 +38,6 @@ from typing import Optional
 import pandas as pd
 
 from src.trading import indicators as ind
-
-
-def _prior_uptrend_pct(df: pd.DataFrame, base_start_idx: int, lookback_bars: int) -> Optional[float]:
-    start = max(0, base_start_idx - lookback_bars)
-    if start >= base_start_idx:
-        return None
-    window = df.iloc[start:base_start_idx]
-    if window.empty:
-        return None
-    prior_low = float(window["Low"].min())
-    base_start_price = float(df["High"].iloc[base_start_idx])
-    if prior_low <= 0:
-        return None
-    return (base_start_price - prior_low) / prior_low * 100
 
 
 def detect_flat_base(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict:
@@ -61,6 +56,9 @@ def detect_flat_base(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict:
     prior_uptrend_lookback = cfg.get("prior_uptrend_lookback_bars", 60)
     vdu_ma_window = cfg.get("vdu_ma_window", 50)
     vdu_max_ratio_pct = cfg.get("vdu_max_ratio_pct", 70.0)
+    final_leg_lookback_bars = cfg.get("final_leg_lookback_bars", 10)
+    final_leg_max_pct = cfg.get("final_leg_max_pct", 10.0)
+    final_leg_vdu_max_ratio = cfg.get("final_leg_vdu_max_ratio_pct", 50.0)
     breakout_vol_multiple = cfg.get("breakout_volume_multiple", 1.4)
 
     not_found = {"found": False}
@@ -96,7 +94,7 @@ def detect_flat_base(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict:
         depth_pct = (base_high - base_low) / base_high * 100
         if depth_pct > max_depth:
             continue
-        prior_pct = _prior_uptrend_pct(df, start_idx, prior_uptrend_lookback)
+        prior_pct = ind.prior_uptrend_pct(df, start_idx, prior_uptrend_lookback)
         if prior_pct is not None and prior_pct < prior_uptrend_min:
             continue
         best = {
@@ -125,14 +123,22 @@ def detect_flat_base(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict:
     if vdu.get("is_vdu") is False:
         quality_flags.append("no volume dry-up within the base — supply hasn't calmed down yet")
 
-    pivot_price = best["base_high"]
-    latest_close = float(df["Close"].iloc[-1])
-    last_vol = float(df["Volume"].iloc[-1])
-    avg_vol = df["Volume"].tail(vdu_ma_window).mean() if len(df) >= vdu_ma_window else None
-    breakout = bool(latest_close >= pivot_price)
-    breakout_volume_confirmed = (
-        bool(avg_vol and avg_vol > 0 and last_vol > avg_vol * breakout_vol_multiple) if breakout else None
+    n = len(df)
+    final_leg_start_idx = max(best["start_idx"], (n - 1) - final_leg_lookback_bars + 1)
+    final_leg = ind.final_leg_readiness(
+        df, final_leg_start_idx, n - 1, final_leg_max_pct, vdu_ma_window, final_leg_vdu_max_ratio,
     )
+    if final_leg["is_ready"] is False:
+        quality_flags.append(
+            f"tail end of the base not yet tight/volume-dried-up (range {final_leg['depth_pct']}% "
+            f"vs {final_leg_max_pct:.0f}% max, VDU {final_leg['volume_dry_up']['ratio_pct']}% "
+            f"vs {final_leg_vdu_max_ratio:.0f}% max) — base may still need more time before a genuine breakout"
+        )
+
+    pivot_price = best["base_high"]
+    bstate = ind.breakout_state(df, pivot_price, vdu_ma_window, breakout_vol_multiple)
+    breakout = bstate["breakout"]
+    breakout_volume_confirmed = bstate["breakout_volume_confirmed"]
 
     return {
         "found": True,
@@ -146,9 +152,11 @@ def detect_flat_base(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict:
             "duration_bars": best["duration"],
             "prior_uptrend_pct": round(best["prior_pct"], 2) if best["prior_pct"] is not None else None,
             "volume_dry_up": vdu,
+            "final_leg": final_leg,
         },
         "pivot_price": round(pivot_price, 2),
         "breakout": breakout,
         "breakout_volume_confirmed": breakout_volume_confirmed,
+        "final_leg_ready": final_leg["is_ready"],
         "quality_flags": quality_flags,
     }

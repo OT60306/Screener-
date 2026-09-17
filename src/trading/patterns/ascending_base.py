@@ -25,6 +25,14 @@ Rules encoded:
    staircases) to call it ascending rather than a single pullback.
 5. Pivot = the most recent leg's high; breakout requires a volume-confirmed
    close at or above it.
+6. Final-leg readiness (same spirit as vcp.py's final-contraction check,
+   cup_with_handle.py's rule 9, and double_bottom.py's rule 6): the segment
+   from the last leg's low up to the latest bar — the final climb back
+   toward the pivot — should be TIGHT (high-low range <= `final_leg_max_pct`)
+   AND show volume dry-up over that same stretch
+   (`final_leg_vdu_max_ratio_pct`). A staircase with the right shape can still
+   be a long way from an actual breakout if this final climb is wide and
+   choppy on heavy volume.
 """
 from __future__ import annotations
 
@@ -47,6 +55,8 @@ def detect_ascending_base(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict:
     higher_high_tolerance_pct = cfg.get("higher_high_tolerance_pct", 3.0)
     min_legs = cfg.get("min_legs", 3)
     vdu_ma_window = cfg.get("vdu_ma_window", 50)
+    final_leg_max_pct = cfg.get("final_leg_max_pct", 10.0)
+    final_leg_vdu_max_ratio = cfg.get("final_leg_vdu_max_ratio_pct", 50.0)
     breakout_vol_multiple = cfg.get("breakout_volume_multiple", 1.4)
 
     not_found = {"found": False}
@@ -95,16 +105,24 @@ def detect_ascending_base(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict:
     last_leg = staircase[-1]
     first_leg = staircase[0]
     pivot_price = last_leg["high"]
-    latest_close = float(df["Close"].iloc[-1])
-    last_vol = float(df["Volume"].iloc[-1])
-    avg_vol = df["Volume"].tail(vdu_ma_window).mean() if len(df) >= vdu_ma_window else None
-    breakout = bool(latest_close >= pivot_price)
-    breakout_volume_confirmed = (
-        bool(avg_vol and avg_vol > 0 and last_vol > avg_vol * breakout_vol_multiple) if breakout else None
-    )
+    bstate = ind.breakout_state(df, pivot_price, vdu_ma_window, breakout_vol_multiple)
+    breakout = bstate["breakout"]
+    breakout_volume_confirmed = bstate["breakout_volume_confirmed"]
 
     avg_leg_depth = sum(l["depth_pct"] for l in staircase) / len(staircase)
     total_rise_pct = (last_leg["high"] - first_leg["low"]) / first_leg["low"] * 100 if first_leg["low"] > 0 else None
+
+    quality_flags = []
+    last_leg_low_idx = last_leg["low_idx"] + offset
+    final_leg = ind.final_leg_readiness(
+        df, last_leg_low_idx, len(df) - 1, final_leg_max_pct, vdu_ma_window, final_leg_vdu_max_ratio,
+    )
+    if final_leg["is_ready"] is False:
+        quality_flags.append(
+            f"final climb back toward the pivot not yet tight/volume-dried-up (range {final_leg['depth_pct']}% "
+            f"vs {final_leg_max_pct:.0f}% max, VDU {final_leg['volume_dry_up']['ratio_pct']}% "
+            f"vs {final_leg_vdu_max_ratio:.0f}% max) — staircase may still need more time before a genuine breakout"
+        )
 
     return {
         "found": True,
@@ -121,9 +139,11 @@ def detect_ascending_base(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict:
                 for l in staircase
             ],
             "total_rise_pct": round(total_rise_pct, 2) if total_rise_pct is not None else None,
+            "final_leg": final_leg,
         },
         "pivot_price": round(pivot_price, 2),
         "breakout": breakout,
         "breakout_volume_confirmed": breakout_volume_confirmed,
-        "quality_flags": [],
+        "final_leg_ready": final_leg["is_ready"],
+        "quality_flags": quality_flags,
     }

@@ -18,6 +18,13 @@ Rules encoded, straight from that description:
 3. Pivot = the pole's peak; breakout requires a volume-confirmed close at or
    above it (the flag should show lighter volume, tightening supply, before
    the next leg up).
+4. Final-leg readiness (same spirit as vcp.py's final-contraction check,
+   cup_with_handle.py's rule 9, and double_bottom.py's rule 6): the flag
+   itself (pole peak up to the latest bar) IS the final leg here — it should
+   be TIGHT (high-low range <= `final_leg_max_pct`) AND show volume dry-up
+   over that same stretch (`final_leg_vdu_max_ratio_pct`), on top of the
+   simpler `max_flag_depth_pct` check above (which only bounds how far the
+   flag gave back, not whether it's actually gone quiet).
 """
 from __future__ import annotations
 
@@ -40,6 +47,8 @@ def detect_high_tight_flag(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict
     max_flag_bars = cfg.get("max_flag_bars", 6)
     max_flag_depth_pct = cfg.get("max_flag_depth_pct", 25.0)
     vdu_ma_window = cfg.get("vdu_ma_window", 10)
+    final_leg_max_pct = cfg.get("final_leg_max_pct", 10.0)
+    final_leg_vdu_max_ratio = cfg.get("final_leg_vdu_max_ratio_pct", 50.0)
     breakout_vol_multiple = cfg.get("breakout_volume_multiple", 1.4)
 
     not_found = {"found": False}
@@ -93,13 +102,21 @@ def detect_high_tight_flag(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict
         return not_found
 
     pivot_price = best["pole_high"]["price"]
-    latest_close = float(df["Close"].iloc[-1])
-    last_vol = float(df["Volume"].iloc[-1])
-    avg_vol = df["Volume"].tail(vdu_ma_window).mean() if len(df) >= vdu_ma_window else None
-    breakout = bool(latest_close >= pivot_price)
-    breakout_volume_confirmed = (
-        bool(avg_vol and avg_vol > 0 and last_vol > avg_vol * breakout_vol_multiple) if breakout else None
+    bstate = ind.breakout_state(df, pivot_price, vdu_ma_window, breakout_vol_multiple)
+    breakout = bstate["breakout"]
+    breakout_volume_confirmed = bstate["breakout_volume_confirmed"]
+
+    quality_flags = []
+    pole_high_idx = best["pole_high"]["idx"] + offset
+    final_leg = ind.final_leg_readiness(
+        df, pole_high_idx, len(df) - 1, final_leg_max_pct, vdu_ma_window, final_leg_vdu_max_ratio,
     )
+    if final_leg["is_ready"] is False:
+        quality_flags.append(
+            f"flag not yet tight/volume-dried-up (range {final_leg['depth_pct']}% "
+            f"vs {final_leg_max_pct:.0f}% max, VDU {final_leg['volume_dry_up']['ratio_pct']}% "
+            f"vs {final_leg_vdu_max_ratio:.0f}% max) — may still need more time before a genuine breakout"
+        )
 
     return {
         "found": True,
@@ -113,9 +130,11 @@ def detect_high_tight_flag(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict
             "flag_low": round(best["flag_low"], 2),
             "flag_depth_pct": round(best["flag_depth_pct"], 2),
             "flag_duration_bars": best["flag_duration"],
+            "final_leg": final_leg,
         },
         "pivot_price": round(pivot_price, 2),
         "breakout": breakout,
         "breakout_volume_confirmed": breakout_volume_confirmed,
-        "quality_flags": [],
+        "final_leg_ready": final_leg["is_ready"],
+        "quality_flags": quality_flags,
     }

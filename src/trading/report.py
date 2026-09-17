@@ -10,7 +10,7 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
-from src.common.data_fetch import get_price_history, get_price_histories, get_info, get_financial_statements
+from src.common.data_fetch import get_price_history, get_price_histories, get_info, get_financial_statements, get_quarterly_income_statement
 from src.common.market_index import get_broad_market_universe
 from src.trading import indicators as ind
 from src.trading import trend_template as tt
@@ -184,12 +184,16 @@ def stock_detail(ticker: str, cfg: Optional[dict] = None, timeframe: str = "day"
 
     info = get_info(ticker)
     stmts = get_financial_statements(ticker)
+    quarterly_income_stmt = get_quarterly_income_statement(ticker)
     wr = ind.weighted_return(daily_df)
     rs_value = _rs_ratings_for([ticker], cfg).get(ticker)
 
     trend_result = tt.evaluate_all(df, rs_value, {**trend_cfg, "rs_rating_min": rs_min})
     index_trend = evaluate_market_health(cfg.get("benchmark_ticker", "SPY"), trend_cfg, timeframe)
-    canslim_result = cs.evaluate_all(daily_df, stmts.get("income_stmt", []), info, rs_value, index_trend)
+    canslim_result = cs.evaluate_all(
+        daily_df, stmts.get("income_stmt", []), info, rs_value, index_trend,
+        quarterly_income_stmt_records=quarterly_income_stmt,
+    )
     pivot_info = ind.find_pivot_breakout(df, **pivot_cfg) if pivot_cfg else ind.find_pivot_breakout(df)
     liquidity = stage1_liquidity(df, liquidity_cfg)
     entry_trigger = stage4_entry_trigger(df, pivot_info, entry_trigger_cfg)

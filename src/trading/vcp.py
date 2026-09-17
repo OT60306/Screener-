@@ -26,7 +26,9 @@ Five things this adds beyond the existing Stage 4 checks:
    trailing N-day window) — VCP requires supply to dry up tightest right
    before the breakout, threshold <=50% of the 50-day average (stricter
    than the general Stage 4 VDU's <=70%) — plus a final-contraction depth
-   check (tight <=12%, ideally <=5%).
+   check (tight <=10%, ideally <=5% — the last wave into a breakout should
+   be a very tight, dried-up squeeze, same ~9-10% ceiling applied to a cup's
+   handle and a double bottom's post-low2 leg in src/trading/patterns/).
 4. RS Line new-high check: stock price relative to a benchmark (SPY),
    distinct from the numeric 1-99 RS Rating used elsewhere — a market
    leader's RS Line should be making new highs alongside (or ahead of) price.
@@ -177,11 +179,12 @@ def classify_contraction_count(
 
 
 def final_contraction_tightness(
-    contractions: list[dict], tight_max_pct: float = 12.0, ideal_max_pct: float = 5.0
+    contractions: list[dict], tight_max_pct: float = 10.0, ideal_max_pct: float = 5.0
 ) -> dict:
     """The last contraction going into a breakout should be the tightest one
-    in the base — pass at <=12% depth, with <=5% considered the ideal,
-    tightest-possible setup."""
+    in the base — pass at <=10% depth (the final wave should be a very tight
+    squeeze, not just "smaller than before"), with <=5% considered the
+    ideal, tightest-possible setup."""
     if not contractions:
         return {"depth_pct": None, "is_tight_enough": None, "is_ideal": None}
     depth = contractions[-1]["depth_pct"]
@@ -256,7 +259,7 @@ def vcp_analysis(
     equal_high_tolerance_pct = cfg.get("equal_high_tolerance_pct", 2.0)
     higher_low_buffer_pct = cfg.get("higher_low_buffer_pct", 0.5)
     vdu_max_ratio_pct = cfg.get("final_contraction_vdu_max_ratio_pct", 50.0)
-    final_tight_max_pct = cfg.get("final_contraction_tight_max_pct", 12.0)
+    final_tight_max_pct = cfg.get("final_contraction_tight_max_pct", 10.0)
     final_ideal_max_pct = cfg.get("final_contraction_ideal_max_pct", 5.0)
     standard_max_count = cfg.get("standard_max_contractions", 4)
     loose_count_threshold = cfg.get("loose_base_contraction_threshold", 5)

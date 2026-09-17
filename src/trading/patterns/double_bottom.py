@@ -19,6 +19,16 @@ Rules encoded:
 4. Prior uptrend gate, same rationale as every other detector here.
 5. Pivot = the middle peak's high (the resistance the W needs to clear);
    breakout requires a volume-confirmed close at or above it.
+6. Final-leg readiness (same spirit as vcp.py's final-contraction check and
+   cup_with_handle.py's rule 9): the segment from the second bottom (Low2)
+   up to the latest bar — the leg climbing back toward the pivot, the W's
+   equivalent of a handle — must be TIGHT (high-low range <=`final_leg_max_pct`,
+   default ~9-10%) AND show volume dry-up over that same stretch
+   (`final_leg_vdu_max_ratio_pct`, default 50%). A double bottom whose second
+   low undercut the first (rule 2) can still be a long way from an actual
+   breakout if this final climb is wide and choppy on heavy volume — this
+   flags that explicitly via `final_leg_ready` rather than only inferring it
+   from the pivot distance.
 """
 from __future__ import annotations
 
@@ -27,23 +37,6 @@ from typing import Optional
 import pandas as pd
 
 from src.trading import indicators as ind
-
-
-def _prior_uptrend_pct(df: pd.DataFrame, low1_idx: int, lookback_bars: int) -> Optional[float]:
-    start = max(0, low1_idx - lookback_bars)
-    if start >= low1_idx:
-        return None
-    window = df.iloc[start:low1_idx]
-    if window.empty:
-        return None
-    prior_low = float(window["Low"].min())
-    low1_price = float(df["Low"].iloc[low1_idx])
-    # prior uptrend measured into the base's own left-side high (the bar right
-    # before low1 starts declining), not into low1 itself
-    left_high = float(df["High"].iloc[max(0, low1_idx - 1): low1_idx + 1].max())
-    if prior_low <= 0:
-        return None
-    return (left_high - prior_low) / prior_low * 100
 
 
 def detect_double_bottom(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict:
@@ -60,6 +53,8 @@ def detect_double_bottom(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict:
     prior_uptrend_min = cfg.get("prior_uptrend_min_pct", 25.0)
     prior_uptrend_lookback = cfg.get("prior_uptrend_lookback_bars", 100)
     vdu_ma_window = cfg.get("vdu_ma_window", 50)
+    final_leg_max_pct = cfg.get("final_leg_max_pct", 10.0)
+    final_leg_vdu_max_ratio = cfg.get("final_leg_vdu_max_ratio_pct", 50.0)
     breakout_vol_multiple = cfg.get("breakout_volume_multiple", 1.4)
 
     not_found = {"found": False}
@@ -91,7 +86,10 @@ def detect_double_bottom(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict:
             continue
 
         low1_df_idx = low1["idx"] + offset
-        prior_pct = _prior_uptrend_pct(df, low1_df_idx, prior_uptrend_lookback)
+        # prior uptrend measured into the base's own left-side high (the bar
+        # right before low1 starts declining), not into low1 itself
+        left_high = float(df["High"].iloc[max(0, low1_df_idx - 1): low1_df_idx + 1].max())
+        prior_pct = ind.prior_uptrend_pct(df, low1_df_idx, prior_uptrend_lookback, ref_price=left_high)
         if prior_pct is not None and prior_pct < prior_uptrend_min:
             continue
 
@@ -110,14 +108,21 @@ def detect_double_bottom(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict:
     if undercut_pct is not None and undercut_pct < 0.5:
         quality_flags.append("second bottom barely undercut the first — borderline signature")
 
-    pivot_price = mid_high["price"]
-    latest_close = float(df["Close"].iloc[-1])
-    last_vol = float(df["Volume"].iloc[-1])
-    avg_vol = df["Volume"].tail(vdu_ma_window).mean() if len(df) >= vdu_ma_window else None
-    breakout = bool(latest_close >= pivot_price)
-    breakout_volume_confirmed = (
-        bool(avg_vol and avg_vol > 0 and last_vol > avg_vol * breakout_vol_multiple) if breakout else None
+    low2_df_idx = low2["idx"] + offset
+    final_leg = ind.final_leg_readiness(
+        df, low2_df_idx, len(df) - 1, final_leg_max_pct, vdu_ma_window, final_leg_vdu_max_ratio,
     )
+    if final_leg["is_ready"] is False:
+        quality_flags.append(
+            f"post-low2 leg not yet tight/volume-dried-up (range {final_leg['depth_pct']}% "
+            f"vs {final_leg_max_pct:.0f}% max, VDU {final_leg['volume_dry_up']['ratio_pct']}% "
+            f"vs {final_leg_vdu_max_ratio:.0f}% max) — base may still need more time before a genuine breakout"
+        )
+
+    pivot_price = mid_high["price"]
+    bstate = ind.breakout_state(df, pivot_price, vdu_ma_window, breakout_vol_multiple)
+    breakout = bstate["breakout"]
+    breakout_volume_confirmed = bstate["breakout_volume_confirmed"]
 
     return {
         "found": True,
@@ -131,9 +136,11 @@ def detect_double_bottom(df: pd.DataFrame, cfg: Optional[dict] = None) -> dict:
             "depth_pct": round(best["depth_pct"], 2),
             "duration_bars": best["duration_bars"],
             "prior_uptrend_pct": round(best["prior_pct"], 2) if best["prior_pct"] is not None else None,
+            "final_leg": final_leg,
         },
         "pivot_price": round(pivot_price, 2),
         "breakout": breakout,
         "breakout_volume_confirmed": breakout_volume_confirmed,
+        "final_leg_ready": final_leg["is_ready"],
         "quality_flags": quality_flags,
     }

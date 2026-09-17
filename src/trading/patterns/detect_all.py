@@ -71,7 +71,24 @@ def detect_all_patterns(df: pd.DataFrame, trading_cfg: dict, timeframe: str = "d
 def detected_pattern_short_labels(df: pd.DataFrame, trading_cfg: dict, timeframe: str = "day") -> str:
     """Compact "Cup, Flat Base"-style string of every pattern currently
     detected (found=True, regardless of breakout state) — for the bulk scan
-    table's "Patterns" column. Returns "-" when nothing is detected."""
+    table's "Patterns" column. Returns "-" when nothing is detected.
+
+    Patterns that expose `final_leg_ready` (all 5: cup_with_handle,
+    double_bottom, ascending_base, flat_base, high_tight_flag — see each
+    detector's own final-leg rule in its module docstring) get a " (tight)"
+    suffix when that final leg — the handle, the post-low2 climb, the last
+    staircase leg, the base's tail end, or the flag itself — is both tight
+    (<=~9-10% range) and volume-dried-up, i.e. it looks like the actual last
+    squeeze before breakout rather than a base still working through it. This
+    is still purely descriptive: it does NOT filter or reorder anything, same
+    as every other pattern signal here (see module docstring)."""
     results = detect_all_patterns(df, trading_cfg, timeframe)
-    labels = [PATTERN_SHORT_LABELS[name] for name, r in results.items() if r.get("found")]
+    labels = []
+    for name, r in results.items():
+        if not r.get("found"):
+            continue
+        label = PATTERN_SHORT_LABELS[name]
+        if r.get("final_leg_ready") is True:
+            label += " (tight)"
+        labels.append(label)
     return ", ".join(labels) if labels else "-"

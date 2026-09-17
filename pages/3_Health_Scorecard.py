@@ -1,3 +1,4 @@
+import html
 from datetime import datetime, timezone
 
 import streamlit as st
@@ -160,10 +161,11 @@ if ticker:
                         date_str = f" — {datetime.fromtimestamp(int(published), tz=timezone.utc).strftime('%Y-%m-%d')}"
                     except (TypeError, ValueError, OSError):
                         date_str = ""
-                title = item.get("title", "")
+                title = html.escape(item.get("title", ""))
+                publisher = html.escape(item.get("publisher", ""))
                 link = item.get("link")
                 line = f"[{title}]({link})" if link else title
-                st.markdown(f"- {line}  \n  <span style='color:rgba(247,241,236,0.65);font-size:0.85rem;'>{item.get('publisher', '')}{date_str}</span>", unsafe_allow_html=True)
+                st.markdown(f"- {line}  \n  <span style='color:rgba(247,241,236,0.65);font-size:0.85rem;'>{publisher}{date_str}</span>", unsafe_allow_html=True)
         else:
             st.caption(cat["status"])
 

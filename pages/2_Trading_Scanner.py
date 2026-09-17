@@ -305,12 +305,16 @@ else:
                     if found:
                         pivot = result.get("pivot_price")
                         breakout = result.get("breakout")
-                        c1, c2 = st.columns(2)
+                        final_leg_ready = result.get("final_leg_ready")
+                        c1, c2, c3 = st.columns(3)
                         if pivot is not None:
                             c1.metric("Pivot", fmt(pivot, 2))
                         with c2:
                             st.markdown("Breakout")
                             st.markdown(status_badge_html(breakout, "Yes", "Not yet", "n/a"), unsafe_allow_html=True)
+                        with c3:
+                            st.markdown("Final leg tight + VDU")
+                            st.markdown(status_badge_html(final_leg_ready, "Yes", "Not yet", "n/a"), unsafe_allow_html=True)
                         flags = result.get("quality_flags") or []
                         if flags:
                             st.caption("Flags: " + "; ".join(flags))

@@ -160,6 +160,31 @@ def get_financial_statements(ticker: str, ttl_hours: float = 168) -> dict:
         return {"income_stmt": [], "balance_sheet": [], "cashflow": []}
 
 
+def get_quarterly_income_statement(ticker: str, ttl_hours: float = 168) -> list:
+    """Returns the quarterly income statement as a (possibly empty)
+    records-oriented list, distinct from get_financial_statements()'s annual
+    'income_stmt' — needed for CANSLIM's "C" (latest-quarter YoY growth),
+    which must not be computed from annual data."""
+
+    def fetch():
+        t = yf.Ticker(ticker)
+        try:
+            df = _retry(lambda: t.quarterly_financials)
+            if df is None or df.empty:
+                return []
+            df = df.reset_index()
+            df.columns = [str(c) for c in df.columns]
+            return df.to_dict(orient="list")
+        except Exception:
+            return []
+
+    try:
+        value, _fresh = cached_fetch("value/fundamentals", f"qstmt_{ticker}", ttl_hours, fetch)
+        return value
+    except Exception:
+        return []
+
+
 def get_news(ticker: str, ttl_hours: float = 12, limit: int = 8) -> list[dict]:
     """Recent headlines for a ticker via yfinance's free news feed (Yahoo
     Finance) — real catalysts/news, no separate paid API key required.

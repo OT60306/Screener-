@@ -13,10 +13,13 @@ from src.common.data_fetch import statement_to_df
 from src.trading import indicators as ind
 
 
-def current_quarterly_earnings_growth(income_stmt_records: list) -> Optional[float]:
-    """C — latest quarter EPS/net income YoY % growth. Best-effort: yfinance's
+def current_quarterly_earnings_growth(quarterly_income_stmt_records: list) -> Optional[float]:
+    """C — latest quarter EPS/net income YoY % growth. Must be fed the
+    *quarterly* income statement (see get_quarterly_income_statement) — the
+    annual one has the wrong period length and silently produces a
+    mislabeled annual-growth number instead. Best-effort: yfinance's
     quarterly history depth varies by ticker."""
-    df = statement_to_df(income_stmt_records)
+    df = statement_to_df(quarterly_income_stmt_records)
     if df.empty or "Net Income" not in df.index:
         return None
     row = df.loc["Net Income"].dropna()
@@ -86,9 +89,10 @@ def evaluate_all(
     info: Optional[dict],
     rs_value: Optional[float],
     index_trend_result: Optional[dict],
+    quarterly_income_stmt_records: Optional[list] = None,
 ) -> dict:
     return {
-        "C_current_qtr_earnings_growth_pct": current_quarterly_earnings_growth(income_stmt_records),
+        "C_current_qtr_earnings_growth_pct": current_quarterly_earnings_growth(quarterly_income_stmt_records or []),
         "A_annual_earnings_growth_pct": annual_earnings_growth(income_stmt_records),
         "N_near_new_highs": new_highs(df),
         "S_volume_confirms": supply_demand_volume(df),
