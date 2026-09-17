@@ -68,7 +68,13 @@ def build_stock_health_report(ticker: str, cfg: dict, news_fn=None) -> dict:
         "entry_timing": pivot,
         "health_score": health,
         "price_history": df,
-        "company_name": info.get("shortName") if info else ticker,
+        # yfinance's `.info` occasionally comes back "thin" — a truthy dict
+        # that's missing individual fields like shortName specifically (seen
+        # in practice for NVDA/MU: header showed the literal text "None
+        # (NVDA)") even though the rest of the fundamentals fetch succeeded.
+        # longName is populated whenever shortName is, so it's a safe
+        # same-cost fallback before giving up to the ticker symbol itself.
+        "company_name": (info.get("shortName") or info.get("longName") or ticker) if info else ticker,
     }
 
 
