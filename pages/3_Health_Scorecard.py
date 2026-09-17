@@ -114,6 +114,15 @@ if ticker:
         st.markdown("**Reverse DCF**")
         m1, m2 = st.columns(2)
         m1.metric("Implied growth rate", fmt_pct(rd["implied_growth_rate_pct"], 2))
+        if rd["implied_growth_rate_pct"] is None:
+            st.caption(
+                "Not available — reverse DCF needs positive free cash flow (Operating Cash Flow minus "
+                "CapEx). Negative FCF is common for banks/financial companies (loan and deposit "
+                "movements flow through Operating Cash Flow, so it isn't a meaningful 'free cash flow' "
+                "figure for them the way it is for industrial/tech companies) and can also happen for "
+                "any company in a heavy investment year. A DCF isn't meaningful without a positive cash "
+                "flow base to project — this isn't a data-fetch failure."
+            )
         m2.metric("Historical revenue CAGR (5Y or available)", fmt_pct(rd["historical_revenue_cagr_pct"], 2))
         st.markdown(
             f"**Industry / TAM growth (analyst forward-estimate proxy):** "
