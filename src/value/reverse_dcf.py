@@ -11,14 +11,29 @@ from typing import Optional
 
 
 def _dcf_value(fcf0: float, growth: float, discount_rate: float, terminal_growth: float, years: int) -> float:
+    return _dcf_value_with_schedule(fcf0, [growth] * years, discount_rate, terminal_growth)
+
+
+def _fade_schedule(start_growth: float, terminal_growth: float, years: int) -> list[float]:
+    """Year-by-year growth rates fading linearly from `start_growth` (year 1)
+    down to `terminal_growth` (the final projection year) — used instead of
+    a single flat rate when the starting growth rate is a hyper-growth
+    outlier that couldn't realistically hold for the whole projection
+    window (see `fair_value_per_share`'s high_growth_fade_threshold_pct)."""
+    if years <= 1:
+        return [start_growth]
+    return [start_growth + (terminal_growth - start_growth) * i / (years - 1) for i in range(years)]
+
+
+def _dcf_value_with_schedule(fcf0: float, growth_schedule: list[float], discount_rate: float, terminal_growth: float) -> float:
     value = 0.0
     fcf = fcf0
-    for year in range(1, years + 1):
+    for year, growth in enumerate(growth_schedule, start=1):
         fcf = fcf * (1 + growth)
         value += fcf / ((1 + discount_rate) ** year)
     terminal_fcf = fcf * (1 + terminal_growth)
     terminal_value = terminal_fcf / (discount_rate - terminal_growth)
-    value += terminal_value / ((1 + discount_rate) ** years)
+    value += terminal_value / ((1 + discount_rate) ** len(growth_schedule))
     return value
 
 
@@ -56,14 +71,31 @@ def fair_value_per_share(
     discount_rate: float,
     terminal_growth: float,
     years: int,
+    high_growth_fade_threshold_pct: Optional[float] = 40.0,
 ) -> Optional[float]:
     """Forward DCF (not reverse): what would this business be worth if it
     grows at `growth_pct` (e.g. its own historical CAGR) instead of the
     market-implied rate — expressed per share so it's directly comparable to
-    the quoted price."""
+    the quoted price.
+
+    A flat `growth_pct` for the entire projection is fine for ordinary
+    growth rates, but a hyper-growth-year CAGR (e.g. a name up 100%+ in a
+    single AI-boom year) compounded flat for a full multi-year horizon
+    produces an absurd fair value no reasonable investor would underwrite —
+    no company sustains that for a decade. Above
+    `high_growth_fade_threshold_pct`, the growth assumption starts at the
+    threshold itself (not the raw CAGR) and fades linearly down to
+    `terminal_growth` by the final projection year, a standard two-stage DCF
+    treatment. Companies at or below the threshold are unaffected — same
+    flat-rate projection as before. Pass `None` to disable the cap/fade
+    entirely and always use the flat rate."""
     if latest_fcf is None or latest_fcf <= 0 or growth_pct is None or not shares_outstanding:
         return None
-    value = _dcf_value(latest_fcf, growth_pct / 100, discount_rate, terminal_growth, years)
+    if high_growth_fade_threshold_pct is not None and growth_pct > high_growth_fade_threshold_pct:
+        schedule = _fade_schedule(high_growth_fade_threshold_pct / 100, terminal_growth, years)
+        value = _dcf_value_with_schedule(latest_fcf, schedule, discount_rate, terminal_growth)
+    else:
+        value = _dcf_value(latest_fcf, growth_pct / 100, discount_rate, terminal_growth, years)
     return round(value / shares_outstanding, 2)
 
 
@@ -102,23 +134,36 @@ def build_reverse_dcf_section(
     discount_rate = dcf_cfg.get("discount_rate", 0.10)
     terminal_growth = dcf_cfg.get("terminal_growth", 0.025)
     years = dcf_cfg.get("projection_years", 10)
+    fade_threshold = dcf_cfg.get("high_growth_fade_threshold_pct", 40.0)
 
     implied = implied_growth_rate(market_cap, latest_fcf, discount_rate, terminal_growth, years)
     mos = margin_of_safety(implied, historical_revenue_cagr_pct)
 
     fv = fair_value_per_share(
-        latest_fcf, historical_revenue_cagr_pct, shares_outstanding, discount_rate, terminal_growth, years
+        latest_fcf, historical_revenue_cagr_pct, shares_outstanding, discount_rate, terminal_growth, years,
+        fade_threshold,
     )
     fv_upside_pct = None
     if fv is not None and current_price:
         fv_upside_pct = round((fv / current_price - 1) * 100, 2)
+    fv_growth_faded = (
+        fade_threshold is not None
+        and historical_revenue_cagr_pct is not None
+        and historical_revenue_cagr_pct > fade_threshold
+    )
 
     return {
-        "assumptions": {"discount_rate_pct": discount_rate * 100, "terminal_growth_pct": terminal_growth * 100, "years": years},
+        "assumptions": {
+            "discount_rate_pct": discount_rate * 100,
+            "terminal_growth_pct": terminal_growth * 100,
+            "years": years,
+            "high_growth_fade_threshold_pct": fade_threshold,
+        },
         "implied_growth_rate_pct": implied,
         "historical_revenue_cagr_pct": historical_revenue_cagr_pct,
         "industry_growth_pct": industry_growth_pct,
         "fair_value_at_historical_cagr": fv,
+        "fair_value_growth_was_faded": fv_growth_faded,
         "current_price": current_price,
         "fair_value_upside_pct": fv_upside_pct,
         "assessment": mos,

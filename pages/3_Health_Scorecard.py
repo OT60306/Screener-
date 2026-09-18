@@ -138,6 +138,15 @@ if ticker:
                 fmt_money(fv, 2),
                 f"{fmt_pct(rd.get('fair_value_upside_pct'), 2)} vs. current price {fmt_money(rd.get('current_price'), 2)}",
             )
+            if rd.get("fair_value_growth_was_faded"):
+                threshold = rd["assumptions"].get("high_growth_fade_threshold_pct")
+                st.caption(
+                    f"Historical CAGR ({fmt_pct(rd['historical_revenue_cagr_pct'], 1)}) is a hyper-growth "
+                    f"outlier that couldn't realistically hold for the full {rd['assumptions']['years']}-year "
+                    f"projection — the growth assumption starts at the {fmt_pct(threshold, 0)} cap and fades "
+                    "linearly down to the terminal growth rate instead of staying flat, so this figure isn't "
+                    "simply the raw CAGR compounded for a decade."
+                )
         else:
             st.caption("Fair value @ historical CAGR: not enough data (needs positive FCF and shares outstanding).")
 

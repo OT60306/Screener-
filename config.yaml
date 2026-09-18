@@ -269,6 +269,15 @@ value:
     discount_rate: 0.10
     terminal_growth: 0.025
     projection_years: 10
+    # "Fair value @ historical CAGR" projects the growth_pct input forward
+    # for the full projection_years — fine for normal growth rates, but
+    # sustaining a hyper-growth-year CAGR (e.g. NVDA's ~100%+ during the AI
+    # boom) for a full 10 years compounds into an absurd fair value. Above
+    # this threshold, the growth assumption starts at the threshold itself
+    # and fades linearly down to terminal_growth by the final projection
+    # year instead of staying flat — companies below the threshold are
+    # completely unaffected (flat-rate projection as before).
+    high_growth_fade_threshold_pct: 40.0
   health_score_weights:          # must sum to 1.0; circle-of-competence & governance excluded by design
     historical_health: 0.41
     moat_quality: 0.35
