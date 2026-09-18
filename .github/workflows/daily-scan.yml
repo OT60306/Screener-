@@ -1,0 +1,44 @@
+name: Daily scan export
+
+# Runs entirely on GitHub's own cloud runners — no local computer needs to be
+# on. Scans the curated watchlist (data/universe.csv) and commits the result
+# to data/exports/latest_scan.json, so any HTTP client (e.g. a Claude
+# coworker) can read the latest snapshot anytime via the raw GitHub URL:
+#   https://raw.githubusercontent.com/<owner>/<repo>/main/data/exports/latest_scan.json
+# See scan_export.py for what's actually computed.
+on:
+  schedule:
+    # 23:00 UTC Sun-Thu = 06:00 Thailand time Mon-Fri (before market-relevant
+    # hours) — GitHub's cron scheduler runs on a best-effort basis and can be
+    # delayed by several minutes to over an hour during high load; treat the
+    # exact time as approximate, not guaranteed.
+    - cron: "0 23 * * 0-4"
+  workflow_dispatch: {} # lets you trigger a run manually from the Actions tab, for testing
+
+permissions:
+  contents: write # needed to commit the export file back to the repo
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scan export
+        run: python scan_export.py
+
+      - name: Commit updated export
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/exports/latest_scan.json
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "Daily scan export [skip ci]"
+          git push
