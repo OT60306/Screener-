@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-20T23:10:43.961404+00:00",
+  "generated_at": "2026-09-22T01:28:04.156959+00:00",
   "universe_file": "data/universe.csv",
   "ticker_count": 36,
   "trading_scan": [
@@ -1203,15 +1203,6 @@
       "jitta_score_proxy": 8.84
     },
     {
-      "ticker": "AVGO",
-      "company_name": "Broadcom Inc.",
-      "health_score": 83.2,
-      "coverage_pct": 100.0,
-      "moat_verdict": "strong structural moat",
-      "piotroski_f_score": 8,
-      "jitta_score_proxy": 8.95
-    },
-    {
       "ticker": "ADBE",
       "company_name": "Adobe Inc.",
       "health_score": 83.2,
@@ -1219,6 +1210,15 @@
       "moat_verdict": "strong structural moat",
       "piotroski_f_score": 6,
       "jitta_score_proxy": 8.85
+    },
+    {
+      "ticker": "AVGO",
+      "company_name": "Broadcom Inc.",
+      "health_score": 83.1,
+      "coverage_pct": 100.0,
+      "moat_verdict": "strong structural moat",
+      "piotroski_f_score": 8,
+      "jitta_score_proxy": 8.95
     },
     {
       "ticker": "MA",
@@ -1232,7 +1232,7 @@
     {
       "ticker": "NFLX",
       "company_name": "Netflix, Inc.",
-      "health_score": 73.9,
+      "health_score": 73.7,
       "coverage_pct": 100.0,
       "moat_verdict": "strong structural moat",
       "piotroski_f_score": 7,
@@ -1241,7 +1241,7 @@
     {
       "ticker": "META",
       "company_name": "Meta Platforms, Inc.",
-      "health_score": 72.6,
+      "health_score": 71.5,
       "coverage_pct": 100.0,
       "moat_verdict": "strong structural moat",
       "piotroski_f_score": 5,
@@ -1250,7 +1250,7 @@
     {
       "ticker": "MSFT",
       "company_name": "Microsoft Corporation",
-      "health_score": 70.5,
+      "health_score": 70.3,
       "coverage_pct": 100.0,
       "moat_verdict": "strong structural moat",
       "piotroski_f_score": 6,
@@ -1286,7 +1286,7 @@
     {
       "ticker": "LLY",
       "company_name": "Eli Lilly and Company",
-      "health_score": 66.1,
+      "health_score": 66.0,
       "coverage_pct": 100.0,
       "moat_verdict": "strong structural moat",
       "piotroski_f_score": 6,
@@ -1302,15 +1302,6 @@
       "jitta_score_proxy": 8.73
     },
     {
-      "ticker": "QCOM",
-      "company_name": "QUALCOMM Incorporated",
-      "health_score": 63.5,
-      "coverage_pct": 100.0,
-      "moat_verdict": "strong structural moat",
-      "piotroski_f_score": 4,
-      "jitta_score_proxy": 7.99
-    },
-    {
       "ticker": "HON",
       "company_name": "Honeywell International Inc.",
       "health_score": 63.4,
@@ -1322,11 +1313,20 @@
     {
       "ticker": "V",
       "company_name": "Visa Inc.",
-      "health_score": 62.9,
+      "health_score": 62.8,
       "coverage_pct": 100.0,
       "moat_verdict": "strong structural moat",
       "piotroski_f_score": 4,
       "jitta_score_proxy": 8.84
+    },
+    {
+      "ticker": "GOOGL",
+      "company_name": "Alphabet Inc.",
+      "health_score": 62.6,
+      "coverage_pct": 100.0,
+      "moat_verdict": "strong structural moat",
+      "piotroski_f_score": 5,
+      "jitta_score_proxy": 8.9
     }
   ]
 }
